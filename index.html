@@ -1455,7 +1455,8 @@ function presencaStep(g, confN) {
   const wait = Math.max(0, conf.length - max);
   const paid = g.paid.filter(id => confSet.has(id)).length;
   let h = `<p class="sub" style="margin:12px 0">${confN ? `${plural(confN, 'confirmado', 'confirmados')}${g.max ? ` para ${g.max} vagas` : ''}${wait ? `, ${wait} na espera` : ''}${paid ? `. ${paid} já ${paid === 1 ? 'pagou' : 'pagaram'}` : ''}.` : 'Toque em confirmar para quem vai jogar. A ordem de confirmação vira a ordem de chegada.'}</p>`;
-  h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm" data-act="copyInvite">${ICON.copy}Copiar convite</button>${W && Object.keys(S.players).length ? `<button class="btn btn-sm" data-act="pasteList">${ICON.paste}Colar lista do grupo</button>` : ''}<a class="btn btn-sm" href="${esc(gcalUrl(g))}" target="_blank" rel="noopener">${ICON.cal}Google Agenda</a></div>`;
+  if (FB() && g.vis === 'privada') h += `<p class="sub small" style="margin:-4px 0 10px">Partida privada: ${plural(g.allowed.filter(u => u !== g.createdBy).length, 'convidado', 'convidados')} além de quem marcou.</p>`;
+  h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><a class="btn btn-sm" href="${esc(gcalUrl(g))}" target="_blank" rel="noopener">${ICON.cal}Google Agenda</a></div>`;
   const row = (p, i, on) => `<div class="pres">
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
     <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
@@ -1465,7 +1466,6 @@ function presencaStep(g, confN) {
   if (conf.length) h += listBox(conf.map((id, i) => row(P(id), i, true)));
   const shownOthers = W ? others : others.filter(p => p.id === meId() && canJoinGame(g));
   if (shownOthers.length) h += section(W ? 'Ainda não confirmaram' : 'Você', listBox(shownOthers.map(p => row(p, 0, false))));
-  if (W) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="${FB() ? 'newGuest' : 'newPlayer'}" data-forgame="1">${ICON.plus}${FB() ? 'Convidado neste jogo' : 'Novo jogador neste jogo'}</button></div>`;
   if (FB() && !W) h += `<p class="sub small" style="margin-top:10px">Quem marcou o jogo cuida dos times, da súmula e do placar.</p>`;
   if (!Object.keys(S.players).length) h += `<p class="sub" style="margin-top:10px">O elenco está vazio. Cadastre os jogadores para confirmar presença.</p>`;
   if (conf.length >= 4 && W) h += `<div style="margin-top:12px"><button class="btn btn-block btn-ball" data-act="step" data-step="times">Ir para os times</button></div>`;
@@ -1653,6 +1653,7 @@ function renderSheet() {
   else if (s.type === 'player') { const p = P(s.pid); if (!p) return closeSheet(); title = p.name; body = playerHTML(p); }
   else if (s.type === 'preview') { title = 'Relatório do jogo'; body = previewHTML(s.gameId); }
   else if (s.type === 'confirm') { title = s.title; body = `<p>${esc(s.text)}</p><div style="display:grid;gap:10px;margin-top:16px"><button class="btn btn-block ${s.danger ? 'btn-danger' : 'btn-ball'}" data-act="confirmOk">${esc(s.ok)}</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Cancelar</button></div>`; }
+  else if (s.type === 'invite') { const g = S.games[s.gameId]; if (!g) return closeSheet(); title = 'Convidar'; body = inviteHTML(g); }
   else if (s.type === 'paste') { title = 'Colar lista do grupo'; body = `<p class="sub">Cole a lista que a galera montou no WhatsApp. O app marca quem achar no elenco, e a ordem da lista vira a ordem de chegada.</p>
     <textarea class="input" id="pasteArea" rows="8" placeholder="1. Rafa&#10;2. Ju&#10;3. Brunão"></textarea>
     <div style="margin-top:10px"><button class="btn btn-block" data-act="parseList">Conferir nomes</button></div><div id="pasteOut" aria-live="polite"></div>`; }
@@ -1707,12 +1708,10 @@ function gameFormHTML(id) {
   ${g ? `<button class="btn btn-block btn-danger" data-act="askDeleteGame" data-id="${esc(id)}">Apagar jogo</button>` : ''}</div>`;
 }
 function visField(g) {
-  const vis = g ? g.vis : 'turma', allowed = new Set(g ? g.allowed : []);
-  const people = Object.values(S.members).filter(m => m.uid !== meId()).map(m => ({ uid: m.uid, name: (P(m.uid) && (P(m.uid).nick || P(m.uid).name)) || m.name || 'Sem nome' })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const vis = g ? g.vis : 'turma';
   return `<div class="field"><span>Quem vê a partida</span>
     <div class="seg seg-full" style="grid-template-columns:1fr 1fr" role="group" aria-label="Quem vê a partida"><button data-act="gVis" data-v="turma" aria-pressed="${vis !== 'privada'}">Toda a turma</button><button data-act="gVis" data-v="privada" aria-pressed="${vis === 'privada'}">Só convidados</button></div>
-    <div id="gAllowWrap" ${vis === 'privada' ? '' : 'hidden'} style="margin-top:10px"><p class="sub small" style="margin-bottom:8px">Só quem você marcar vê a partida e confirma presença. ${people.length ? '' : 'Ainda não tem ninguém na turma para convidar.'}</p>
-      <div class="row-wrap">${people.map(m => `<button class="chip" data-act="gAllow" data-uid="${esc(m.uid)}" aria-pressed="${allowed.has(m.uid)}">${esc(m.name)}</button>`).join('')}</div></div></div>`;
+    <p class="sub small" id="gVisHint" style="margin-top:8px" ${vis === 'privada' ? '' : 'hidden'}>${g ? 'Quem vê você escolhe dentro da partida, em Convidar.' : 'Depois de criar, abra a partida e toque em Convidar para escolher quem vê.'}</p></div>`;
 }
 function nextDateLike(last) {
   const t = todayStr();
@@ -1732,6 +1731,26 @@ function formPlayer() {
   const p = { id: f.pid || 'novo', name: name || 'Jogador', nick: nick || name.split(' ')[0] || 'Jogador', pos: f.pos, pos2: f.pos2, at, photo: f.photo, last: null, calib: cur ? cur.calib : true };
   p.forma = cur ? cur.forma : tecnica(p);
   return p;
+}
+function inviteHTML(g) {
+  const W = canEditGame(g);
+  let h = '';
+  if (FB() && W) {
+    h += `<div class="field"><span>Quem vê a partida</span><div class="seg seg-full" style="grid-template-columns:1fr 1fr" role="group" aria-label="Quem vê a partida"><button data-act="setVis" data-v="turma" aria-pressed="${g.vis !== 'privada'}">Toda a turma</button><button data-act="setVis" data-v="privada" aria-pressed="${g.vis === 'privada'}">Só convidados</button></div></div>`;
+    if (g.vis === 'privada') {
+      const people = Object.values(S.members).filter(m => m.uid !== g.createdBy).map(m => ({ uid: m.uid, p: P(m.uid), name: (P(m.uid) && (P(m.uid).nick || P(m.uid).name)) || m.name || 'Sem nome' })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+      h += section('Pessoas da turma', `<p class="sub small" style="margin:-4px 0 10px">Só quem estiver convidado vê a partida e confirma presença.</p>` + (people.length ? listBox(people.map(m => {
+        const on = g.allowed.includes(m.uid);
+        return `<div class="pres">${avatar(m.p || { name: m.name })}<div class="item-main"><div class="item-title">${esc(m.name)}</div><div class="item-sub">${g.conf.includes(m.uid) ? 'Confirmado' : (on ? 'Convidado' : 'Não vê a partida')}</div></div><button class="toggle" data-act="inviteToggle" data-uid="${esc(m.uid)}" aria-pressed="${on}">${on ? 'Convidado' : 'Convidar'}</button></div>`;
+      })) : '<p class="sub">Ainda não tem ninguém na turma para convidar. Chame a galera pelo link da turma.</p>'));
+    } else h += `<div class="banner">Toda a turma já vê esta partida. Para escolher quem vê, toque em "Só convidados".</div>`;
+  }
+  h += section(FB() && W ? 'Outras formas' : 'Convidar', `<div style="display:grid;gap:10px">
+    <button class="btn btn-block ${FB() && W ? '' : 'btn-ball'}" data-act="copyInvite">${ICON.copy}Mandar convite no WhatsApp</button>
+    ${W && Object.keys(S.players).length ? `<button class="btn btn-block" data-act="pasteList">${ICON.paste}Colar lista do grupo</button>` : ''}
+    ${W ? `<button class="btn btn-block" data-act="${FB() ? 'newGuest' : 'newPlayer'}" data-forgame="1">${ICON.plus}${FB() ? 'Adicionar convidado sem conta' : 'Novo jogador neste jogo'}</button>` : ''}
+  </div><p class="sub small" style="margin-top:8px">${FB() && g.vis === 'privada' ? 'O link da partida só abre para quem foi convidado aqui.' : 'O convite vai com a lista de quem já confirmou e o link do app.'}</p>`);
+  return h;
 }
 function perfilHTML() {
   const mine = P(meId());
@@ -2284,10 +2303,11 @@ const ACT = {
     const id = el.dataset.id;
     const visBtn = document.querySelector('[data-act="gVis"][aria-pressed="true"]');
     const vis = FB() && visBtn ? visBtn.dataset.v : 'turma';
-    const allowed = vis === 'privada' ? [...new Set([meId()].concat([...document.querySelectorAll('[data-act="gAllow"][aria-pressed="true"]')].map(b => b.dataset.uid)))] : [];
+    const allowed = vis === 'privada' && meId() ? [meId()] : [];
     if (id && S.games[id]) {
       if (!canEditGame(S.games[id])) return closeSheet();
-      Object.assign(S.games[id], { date, time, max, place, note }, FB() ? { vis, allowed: vis === 'privada' ? [...new Set(allowed.concat(S.games[id].createdBy ? [S.games[id].createdBy] : []))] : [] } : {});
+      const g0 = S.games[id];
+      Object.assign(g0, { date, time, max, place, note }, FB() ? { vis, allowed: vis === 'privada' ? [...new Set(g0.allowed.concat(g0.createdBy ? [g0.createdBy] : []))] : g0.allowed } : {});
       persist('games', id); closeSheet(); render(); toast('Jogo salvo.');
     } else {
       const last = Object.values(S.games).sort(byDate).pop();
@@ -2299,7 +2319,7 @@ const ACT = {
   },
   gVis: el => {
     document.querySelectorAll('[data-act="gVis"]').forEach(b => b.setAttribute('aria-pressed', String(b === el)));
-    const wrap = $('#gAllowWrap'); if (wrap) wrap.hidden = el.dataset.v !== 'privada';
+    const hint = $('#gVisHint'); if (hint) hint.hidden = el.dataset.v !== 'privada';
   },
   gAllow: el => el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')),
   askDeleteGame: el => canEditGame(S.games[el.dataset.id]) && openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda e, se tinha placar, as cartas voltam a ficar como se ele não tivesse acontecido.', ok: 'Apagar jogo', danger: true, run: () => { delete S.games[el.dataset.id]; persist('games', el.dataset.id); S.ui.gameId = null; closeSheet(); render(); toast('Jogo apagado.'); } }),
@@ -2320,7 +2340,32 @@ const ACT = {
   },
   heroPres: el => { const g = S.games[el.dataset.id]; if (!g || !FB() || !S.players[meId()]) return; const on = !g.conf.includes(meId()); presenceSet(g, meId(), on); toast(on ? 'Presença confirmada.' : 'Presença desmarcada.'); },
   togglePaid: el => { const g = curGame(), id = el.dataset.pid; if (!g || !canEditGame(g)) return; g.paid = g.paid.includes(id) ? g.paid.filter(x => x !== id) : g.paid.concat(id); persist('games', g.id); render(); },
-  copyInvite: () => { const g = curGame(); if (g) copyText(inviteText(g)); },
+  copyInvite: async () => {
+    const g = curGame(); if (!g) return;
+    const text = inviteText(g);
+    try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+    copyText(text);
+  },
+  openInvite: () => { const g = curGame(); if (g) openSheet({ type: 'invite', gameId: g.id }); },
+  setVis: el => {
+    const g = S.games[S.ui.sheet && S.ui.sheet.gameId]; if (!g || !canEditGame(g) || !FB()) return;
+    g.vis = el.dataset.v === 'privada' ? 'privada' : 'turma';
+    if (g.vis === 'privada') g.allowed = [...new Set((g.createdBy ? [g.createdBy] : []).concat(g.allowed))];
+    persist('games', g.id); renderSheet(); render();
+  },
+  inviteToggle: el => {
+    const g = S.games[S.ui.sheet && S.ui.sheet.gameId], u = el.dataset.uid; if (!g || !canEditGame(g) || !u) return;
+    if (g.allowed.includes(u)) {
+      g.allowed = g.allowed.filter(x => x !== u);
+      persist('games', g.id);
+      if (g.conf.includes(u)) presenceSet(g, u, false);
+      toast(`${nameOf(u)} não vê mais a partida.`);
+    } else {
+      g.allowed = g.allowed.concat(u); persist('games', g.id);
+      toast(`${nameOf(u)} foi convidado. Mande o link para avisar.`);
+    }
+    renderSheet(); render();
+  },
   pasteList: () => { S.ui.paste = null; openSheet({ type: 'paste' }); setTimeout(() => { const t = $('#pasteArea'); if (t) t.focus(); }, 60); },
   parseList: () => {
     const r = matchList(($('#pasteArea') || {}).value);
