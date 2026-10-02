@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function turmaDoc(t) { return get(/databases/$(database)/documents/turmas/$(t)); }
+    function isMember(t) { return signedIn() && exists(/databases/$(database)/documents/turmas/$(t)/membros/$(me())); }
+    function isAdmin(t) { return signedIn() && me() in turmaDoc(t).data.admins; }
+    function same(f) { return request.resource.data.get(f, null) == resource.data.get(f, null); }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function resultSame() {
+      return request.resource.data.get('sets', []) == resource.data.get('sets', [])
+        && request.resource.data.get('teams', null) == resource.data.get('teams', null)
+        && request.resource.data.get('join', {}) == resource.data.get('join', {})
+        && request.resource.data.get('leave', {}) == resource.data.get('leave', {})
+        && request.resource.data.get('track', []) == resource.data.get('track', [])
+        && request.resource.data.get('log', []).size() == resource.data.get('log', []).size();
+    }
+
+    match /users/{u} {
+      allow read, write: if signedIn() && me() == u;
+    }
+
+    match /turmas/{t} {
+      allow read: if isMember(t);
+      allow create: if signedIn() && request.resource.data.ownerUid == me() && request.resource.data.admins == [me()];
+      allow update: if isAdmin(t) && same('ownerUid') && resource.data.ownerUid in request.resource.data.admins;
+      allow delete: if signedIn() && resource.data.ownerUid == me();
+
+      match /membros/{m} {
+        allow read: if isMember(t);
+        allow create: if signedIn() && m == me() && request.resource.data.uid == me()
+          && request.resource.data.code == getAfter(/databases/$(database)/documents/turmas/$(t)).data.inviteCode;
+        allow delete: if signedIn() && (m == me() || (isAdmin(t) && m != turmaDoc(t).data.ownerUid));
+      }
+
+      match /players/{p} {
+        allow read: if isMember(t);
+        allow create: if isMember(t) && request.resource.data.createdBy == me() && request.resource.data.get('locked', false) == false && (
+          (p == me() && request.resource.data.ownerUid == me() && request.resource.data.guest == false)
+          || (p.matches('g_.*') && request.resource.data.ownerUid == null && request.resource.data.guest == true));
+        allow update: if isMember(t) && same('ownerUid') && same('guest') && same('createdBy') && (
+          (p == me() && !changed().hasAny(['adj']) && (resource.data.get('locked', false) == false || (same('base') && same('locked'))))
+          || (resource.data.guest == true && (resource.data.createdBy == me() || isAdmin(t)))
+          || (changed().hasOnly(['locked']) && request.resource.data.locked == true));
+        allow delete: if isMember(t) && resource.data.guest == true && (resource.data.createdBy == me() || isAdmin(t));
+      }
+
+      match /games/{g} {
+        allow read: if isMember(t);
+        allow create: if isMember(t) && request.resource.data.createdBy == me() && request.resource.data.get('confirms', {}).size() == 0;
+        allow update: if isMember(t) && same('createdBy') && (
+          ((resource.data.createdBy == me() || isAdmin(t)) && same('confirms')
+            && (resultSame() || request.resource.data.get('resultRev', 0) > resource.data.get('resultRev', 0)))
+          || (changed().hasOnly(['conf'])
+              && request.resource.data.get('conf', []).removeAll([me()]) == resource.data.get('conf', []).removeAll([me()]))
+          || (changed().hasOnly(['confirms'])
+              && request.resource.data.get('confirms', {}).diff(resource.data.get('confirms', {})).affectedKeys().hasOnly([me()])
+              && (!(me() in request.resource.data.get('confirms', {})) || request.resource.data.confirms[me()] == resource.data.get('resultRev', 0))));
+        allow delete: if isMember(t) && (resource.data.createdBy == me() || isAdmin(t));
+      }
+    }
+  }
+}
