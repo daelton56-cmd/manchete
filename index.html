@@ -1108,7 +1108,7 @@ async function onAuthChange(u) {
     S.invite = null; clearInvite();
   }
   if (!t && ud && ud.lastTurma) t = ud.lastTurma;
-  if (!t) { S.mode = 'no-turma'; render(); return; }
+  if (!t) { S.mode = 'no-turma'; render(); loadMyTurmas(); return; }
   openTurma(t);
 }
 function openTurma(t) {
@@ -1121,11 +1121,19 @@ function openTurma(t) {
   subscribe();
   setTimeout(() => { if (S.mode === 'loading-cloud' && S.turmaId === t) { S.loadErr = true; render(); } }, 20000);
 }
+function loadMyTurmas() {
+  if (!S.me || !window.MCloud || !window.MCloud.listTurmas) return;
+  window.MCloud.listTurmas(S.me.uid).then(list => {
+    S.myTurmas = (list || []).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+    if (S.ui.sheet && S.ui.sheet.type === 'perfil') renderSheet();
+    if (S.mode === 'no-turma') render();
+  }).catch(() => { S.myTurmas = []; });
+}
 function lostTurma() {
   if (!FBM() || S.mode === 'no-turma') return;
   stopListening(); resetData();
   window.MCloud.setUser(S.me.uid, { lastTurma: null }).catch(() => { });
-  S.mode = 'no-turma'; S.authMsg = 'Você não está mais nessa turma.'; render();
+  S.mode = 'no-turma'; S.authMsg = 'Você não está mais nessa turma.'; render(); loadMyTurmas();
 }
 function resync() { if (!FB()) return; const t = S.turmaId; stopListening(); S.unsubs = []; openTurma(t); }
 function canCreate() { return S.canWrite && (!FBM() || (FB() && !!S.players[meId()])); }
@@ -1290,8 +1298,19 @@ function authView() {
     ${isNew ? '' : '<button class="btn btn-block btn-ghost" data-act="resetPass">Esqueci a senha</button>'}
   </div>`;
 }
+function myTurmasList(currentId) {
+  const list = S.myTurmas;
+  if (list == null) return '<p class="sub small">Carregando suas turmas…</p>';
+  if (!list.length) return '<p class="sub small">Você ainda não está em nenhuma turma.</p>';
+  return listBox(list.map(t => {
+    const role = t.ownerUid === meId() ? 'Você criou' : ((t.admins || []).includes(meId()) ? 'Admin' : 'Membro');
+    return `<div class="pres"><div class="item-main"><div class="item-title">${esc(t.name || 'Sem nome')}</div><div class="item-sub">${role}</div></div>${t.id === currentId ? '<span class="pill pill-done">Aberta</span>' : `<button class="btn btn-sm" data-act="switchTurma" data-t="${esc(t.id)}">Abrir</button>`}</div>`;
+  }));
+}
 function noTurmaView() {
-  return `<div class="empty" style="margin-top:16px"><h3>Você ainda não está numa turma</h3><p class="sub">${S.authMsg ? esc(S.authMsg) + ' ' : ''}Crie a sua e chame a galera pelo link, ou cole aqui o link de convite que te mandaram.</p></div>
+  const others = S.myTurmas && S.myTurmas.length;
+  return `<div class="empty" style="margin-top:16px"><h3>${others ? 'Escolha uma turma' : 'Você ainda não está numa turma'}</h3><p class="sub">${S.authMsg ? esc(S.authMsg) + ' ' : ''}${others ? 'Abra uma das suas turmas, crie outra ou entre com um link de convite.' : 'Crie a sua e chame a galera pelo link, ou cole aqui o link de convite que te mandaram.'}</p></div>
+  ${others ? section('Suas turmas', myTurmasList(null)) : ''}
   ${section('Criar uma turma', `<label class="field"><span>Nome da turma</span><input class="input" id="tName" maxlength="40" placeholder="Ex.: Vôlei de quinta"></label><button class="btn btn-block btn-ball" data-act="createTurma">Criar turma</button>`)}
   ${section('Tenho um convite', `<label class="field"><span>Link de convite</span><input class="input" id="tLink" autocapitalize="off" spellcheck="false" placeholder="Cole o link aqui"></label><button class="btn btn-block" data-act="joinByLink">Entrar na turma</button>`)}
   <div class="err" role="alert" id="tErr"></div>
@@ -1579,10 +1598,25 @@ function renderSheet() {
   else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = gameFormHTML(s.id); }
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
+  else if (s.type === 'turmaName') {
+    title = s.mode === 'new' ? 'Nova turma' : 'Renomear turma';
+    body = `<label class="field"><span>Nome da turma</span><input class="input" id="tnName" maxlength="40" value="${esc(s.mode === 'new' ? '' : (S.turma && S.turma.name) || '')}" placeholder="Ex.: Vôlei de sábado"></label>
+      ${s.mode === 'new' ? '<p class="sub small">Você vira admin da turma nova e pode chamar a galera por um link só dela. As cartas de cada turma são separadas.</p>' : ''}
+      <div class="err" role="alert" id="tnErr"></div>
+      <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-ball" data-act="${s.mode === 'new' ? 'createTurmaSheet' : 'saveTurmaName'}">${s.mode === 'new' ? 'Criar turma' : 'Salvar nome'}</button><button class="btn btn-block btn-ghost" data-act="perfil">Voltar</button></div>`;
+  }
+  else if (s.type === 'deleteTurma') {
+    const nm = (S.turma && S.turma.name) || '';
+    title = 'Apagar a turma';
+    body = `<p>Isso apaga a turma ${esc(nm)} para todo mundo: as cartas, os jogos, a súmula e a lista de membros. Não dá para desfazer.</p>
+      <label class="field"><span>Para confirmar, escreva o nome da turma</span><input class="input" id="dtName" autocomplete="off" placeholder="${esc(nm)}"></label>
+      <div class="err" role="alert" id="dtErr"></div>
+      <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-danger" data-act="deleteTurma">Apagar a turma</button><button class="btn btn-block btn-ghost" data-act="perfil">Voltar</button></div>`;
+  }
   else if (s.type === 'deleteAccount') {
     title = 'Apagar minha conta';
     body = S.turma && S.turma.ownerUid === meId()
-      ? `<p>Você criou a turma ${esc(S.turma.name || '')}, então apagar a sua conta deixaria a turma sem dono. Por enquanto, só dá para apagar a conta de quem não criou a turma.</p><button class="btn btn-block btn-ghost" data-act="closeSheet">Voltar</button>`
+      ? `<p>Você criou a turma ${esc(S.turma.name || '')}, então apagar a sua conta deixaria a turma sem dono. Apague a turma antes, aqui na tela da turma, e depois apague a conta.</p><button class="btn btn-block btn-ghost" data-act="perfil">Voltar</button>`
       : `<p>Sua conta é apagada, e na turma sua carta vira "Ex-jogador", sem nome e sem foto. Os jogos continuam no histórico dos outros, sem identificar você. Não dá para desfazer.</p>
         <label class="field"><span>Digite sua senha para confirmar</span><input class="input" type="password" id="delPass" autocomplete="current-password"></label>
         <div class="err" role="alert" id="delErr"></div>
@@ -1670,13 +1704,15 @@ function perfilHTML() {
     ? `<div style="max-width:180px;margin:0 auto 12px">${cardHTML(mine, { destaque: mine.id === mvpId() })}</div><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar minha carta</button>`
     : `<div class="empty"><h3>Você ainda não tem carta</h3><p class="sub">Crie a sua para entrar no elenco e confirmar presença.</p><button class="btn btn-ball" data-act="newSelf">Criar minha carta</button></div>`;
   h += `<p class="sub small" style="text-align:center;margin-top:10px">Conectado como ${esc(S.me.name)}, ${esc(S.me.email)}.</p>`;
-  h += section(S.turma && S.turma.name ? S.turma.name : 'Turma', `<div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link de convite</button>' : ''}</div><p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p>`);
+  h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">${esc(S.turma && S.turma.name ? S.turma.name : 'Turma')}</h2>${admin ? '<button class="btn btn-sm" data-act="renameTurma">Renomear</button>' : ''}</div>`;
+  h += `<div><div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link de convite</button>' : ''}</div><p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p></div>`;
   h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, listBox(members.map(m => {
     const role = S.turma && S.turma.ownerUid === m.uid ? 'Criou a turma' : (S.turma && (S.turma.admins || []).includes(m.uid) ? 'Admin' : 'Membro');
     const canKick = admin && m.uid !== meId() && !(S.turma && S.turma.ownerUid === m.uid);
     return `<div class="pres">${avatar(P(m.uid) || { name: m.name || '?' })}<div class="item-main"><div class="item-title">${esc(m.name || 'Sem nome')}${m.uid === meId() ? ' (você)' : ''}</div><div class="item-sub">${role}${P(m.uid) ? '' : ', ainda sem carta'}</div></div>${canKick ? `<button class="btn btn-sm btn-danger" data-act="askRemoveMember" data-uid="${esc(m.uid)}">Tirar</button>` : ''}</div>`;
   })));
-  h += `<div style="display:grid;gap:10px;margin-top:16px">${owner ? '' : '<button class="btn btn-block btn-ghost" data-act="askLeaveTurma">Sair da turma</button>'}<button class="btn btn-block btn-ghost" data-act="signOut">Sair da conta</button><button class="btn btn-block btn-danger" data-act="askDeleteAccount">Apagar minha conta</button></div>`;
+  h += section('Suas turmas', myTurmasList(S.turmaId) + `<div style="margin-top:10px"><button class="btn btn-block" data-act="newTurma">${ICON.plus}Nova turma</button></div>`);
+  h += `<div style="display:grid;gap:10px;margin-top:16px">${owner ? '<button class="btn btn-block btn-danger" data-act="askDeleteTurma">Apagar esta turma</button>' : '<button class="btn btn-block btn-ghost" data-act="askLeaveTurma">Sair da turma</button>'}<button class="btn btn-block btn-ghost" data-act="signOut">Sair da conta</button><button class="btn btn-block btn-danger" data-act="askDeleteAccount">Apagar minha conta</button></div>`;
   return h;
 }
 function playerFormHTML() {
@@ -2096,7 +2132,36 @@ const ACT = {
     try { await window.MCloud.joinTurma(inv.t, inv.c, S.me); S.authMsg = ''; openTurma(inv.t); }
     catch (e) { err.textContent = 'Esse convite não vale mais. Peça um link novo para quem te chamou.'; el.disabled = false; }
   },
-  perfil: () => { if (FB()) openSheet({ type: 'perfil' }); },
+  perfil: () => { if (FB()) { openSheet({ type: 'perfil' }); loadMyTurmas(); } },
+  switchTurma: el => { const t = el.dataset.t; if (!t || !S.me) return; closeSheet(); S.authMsg = ''; S.ui.tab = 'jogos'; openTurma(t); },
+  renameTurma: () => { if (isTurmaAdmin()) openSheet({ type: 'turmaName', mode: 'rename' }); },
+  newTurma: () => openSheet({ type: 'turmaName', mode: 'new' }),
+  saveTurmaName: async el => {
+    const name = ($('#tnName').value || '').trim().slice(0, 40), err = $('#tnErr');
+    if (!name) { err.textContent = 'Dê um nome para a turma.'; return; }
+    el.disabled = true;
+    try { await window.MCloud.renameTurma(S.turmaId, name); closeSheet(); toast('Nome da turma atualizado.'); }
+    catch (e) { err.textContent = 'Não consegui salvar. Confira a internet e tente de novo.'; el.disabled = false; }
+  },
+  createTurmaSheet: async el => {
+    const name = ($('#tnName').value || '').trim().slice(0, 40), err = $('#tnErr');
+    if (!name) { err.textContent = 'Dê um nome para a turma.'; return; }
+    el.disabled = true;
+    try { const r = await window.MCloud.createTurma(name, S.me); closeSheet(); S.ui.tab = 'jogos'; openTurma(r.id); toast(`Turma ${name} criada.`); }
+    catch (e) { err.textContent = 'Não consegui criar a turma. Confira a internet e tente de novo.'; el.disabled = false; }
+  },
+  askDeleteTurma: () => { if (S.turma && S.turma.ownerUid === meId()) openSheet({ type: 'deleteTurma' }); },
+  deleteTurma: async el => {
+    const typed = ($('#dtName').value || '').trim().toLowerCase(), nm = ((S.turma && S.turma.name) || '').trim().toLowerCase(), err = $('#dtErr');
+    if (!typed || typed !== nm) { err.textContent = 'O nome não confere.'; return; }
+    el.disabled = true; err.textContent = 'Apagando…';
+    const t = S.turmaId;
+    try {
+      stopListening();
+      await window.MCloud.deleteTurma(t, meId());
+      closeSheet(); resetData(); S.mode = 'no-turma'; S.authMsg = ''; render(); loadMyTurmas(); toast('Turma apagada.');
+    } catch (e) { err.textContent = 'Não consegui apagar tudo. Confira a internet e tente de novo.'; el.disabled = false; openTurma(t); }
+  },
   shareInvite: async () => {
     const url = inviteLink(); if (!url) return;
     const name = S.turma.name || 'da galera';
@@ -2130,7 +2195,7 @@ const ACT = {
     catch (e) { err.textContent = e && e.code === 'auth/invalid-credential' || e && e.code === 'auth/wrong-password' ? 'Senha não confere.' : 'Não consegui apagar agora. Confira a internet e tente de novo.'; el.disabled = false; }
   },
   askLeaveTurma: () => openSheet({ type: 'confirm', title: 'Sair da turma?', text: 'Você deixa de ver a turma. Para voltar, precisa de um link de convite.', ok: 'Sair da turma', danger: true, run: async () => {
-    try { await window.MCloud.leaveTurma(S.turmaId, meId()); closeSheet(); lostTurma(); S.authMsg = ''; render(); } catch (e) { toast('Não consegui sair agora.'); }
+    try { await window.MCloud.leaveTurma(S.turmaId, meId()); closeSheet(); lostTurma(); S.authMsg = ''; render(); toast('Você saiu da turma.'); } catch (e) { toast('Não consegui sair agora.'); }
   } }),
   backup: () => exportBackup(),
   restore: () => { const i = $('#backupInput'); i.value = ''; i.click(); },
@@ -2484,7 +2549,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top
 // Manchete: ponte com o Firebase (login por e-mail e senha + banco Firestore)
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, collection, setDoc, getDoc, deleteDoc, updateDoc, onSnapshot, writeBatch, arrayUnion, arrayRemove } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, collection, setDoc, getDoc, getDocs, deleteDoc, updateDoc, onSnapshot, writeBatch, arrayUnion, arrayRemove } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const app = initializeApp(window.MANCHETE_FIREBASE);
 const auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
@@ -2543,7 +2608,32 @@ window.MCloud = {
     try { await deleteDoc(doc(fs, 'users', u.uid)); } catch (e) { }
     await guard(deleteUser(u));
   },
-  leaveTurma: (t, uid) => guard(deleteDoc(doc(fs, 'turmas', t, 'membros', uid))),
+  async leaveTurma(t, uid) {
+    await guard(deleteDoc(doc(fs, 'turmas', t, 'membros', uid)));
+    await guard(setDoc(doc(fs, 'users', uid), { turmas: arrayRemove(t), lastTurma: null }, { merge: true }));
+  },
+  async listTurmas(uid) {
+    let ids = [];
+    try { const s = await getDoc(doc(fs, 'users', uid)); ids = (s.exists() && s.data().turmas) || []; } catch (e) { }
+    const out = [];
+    for (const id of ids) { try { const s = await getDoc(doc(fs, 'turmas', id)); if (s.exists()) out.push({ id, ...s.data() }); } catch (e) { } }
+    return out;
+  },
+  renameTurma: (t, name) => guard(updateDoc(doc(fs, 'turmas', t), { name })),
+  // Apaga a turma inteira: partidas, cartas e membros primeiro, e por último a própria turma.
+  async deleteTurma(t, uid) {
+    const refs = [];
+    for (const kind of ['games', 'players', 'membros']) {
+      const s = await guard(getDocs(collection(fs, 'turmas', t, kind)));
+      s.docs.forEach(d => { if (!(kind === 'membros' && d.id === uid)) refs.push(d.ref); });
+    }
+    for (let i = 0; i < refs.length; i += 400) { const b = writeBatch(fs); refs.slice(i, i + 400).forEach(r => b.delete(r)); await guard(b.commit()); }
+    const b = writeBatch(fs);
+    b.delete(doc(fs, 'turmas', t, 'membros', uid));
+    b.delete(doc(fs, 'turmas', t));
+    b.set(doc(fs, 'users', uid), { turmas: arrayRemove(t), lastTurma: null }, { merge: true });
+    await guard(b.commit());
+  },
   removeMember: (t, uid) => guard(deleteDoc(doc(fs, 'turmas', t, 'membros', uid))),
   async newInvite(t) { const c = code(); await guard(updateDoc(doc(fs, 'turmas', t), { inviteCode: c })); return c; },
   watchTurma: (t, next, error) => onSnapshot(doc(fs, 'turmas', t), s => next(s.exists() ? { id: s.id, ...s.data() } : null), e => error && error(fail(e))),

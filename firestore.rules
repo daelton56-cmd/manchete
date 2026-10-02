@@ -43,7 +43,7 @@ service cloud.firestore {
           (p == me() && !changed().hasAny(['adj']) && (resource.data.get('locked', false) == false || (same('base') && same('locked'))))
           || (resource.data.guest == true && (resource.data.createdBy == me() || isAdmin(t)))
           || (changed().hasOnly(['locked']) && request.resource.data.locked == true));
-        allow delete: if isMember(t) && resource.data.guest == true && (resource.data.createdBy == me() || isAdmin(t));
+        allow delete: if isMember(t) && ((resource.data.guest == true && (resource.data.createdBy == me() || isAdmin(t))) || turmaDoc(t).data.ownerUid == me());
       }
 
       match /games/{g} {
