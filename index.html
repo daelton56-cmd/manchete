@@ -293,6 +293,14 @@ input[type=date].input::-webkit-datetime-edit,input[type=time].input::-webkit-da
 .rng-val{font-family:var(--display); font-weight:800; font-size:24px; line-height:1; white-space:nowrap}
 .rng-val small{font-family:var(--text); font-weight:600; font-size:13px; color:var(--muted); margin-right:6px}
 .rng-line{display:flex; align-items:center; gap:12px}
+.rng-num{width:3.2ch; font-family:var(--display); font-weight:800; font-size:26px; line-height:1.05; text-align:right; color:var(--ink); background:transparent; border:0; border-bottom:2px dashed var(--line-strong); border-radius:0; padding:0 2px 1px; -webkit-appearance:none; appearance:none}
+.rng-num:focus{outline:none; border-bottom-color:var(--focus); border-bottom-style:solid; background:var(--surface)}
+.rng-num::placeholder{color:var(--muted); opacity:.6}
+.rng-num.bad{color:var(--neg); border-bottom-color:var(--neg); border-bottom-style:solid}
+.rng-err{color:var(--neg); font-size:13px; font-weight:600; margin-top:2px}
+.rng-err:empty{display:none}
+.seg-full{display:grid; grid-template-columns:repeat(3,1fr); width:100%}
+.seg-full button{min-height:42px}
 .rng{position:relative; flex:1; min-width:0; touch-action:pan-y; cursor:pointer; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; border-radius:10px}
 .bar{height:52px}
 .rng-track{position:absolute; left:16px; right:16px; top:50%; height:10px; margin-top:-5px; border-radius:5px; background:var(--star-off)}
@@ -415,11 +423,11 @@ function expectedNet(attr, A) {
   const [lo, hi] = EXPECT[attr];
   return lo + ((clamp(A, 40, 99) - 40) / 59) * (hi - lo);
 }
-function statDelta(attr, A, net, sets) {
+function statDelta(attr, A, net, sets, f = 1) {
   if (!sets) return 0;
   const c = Math.min(sets, 4) / 4;
-  let d = 2 * (net / sets - expectedNet(attr, A)) * c;
-  d = clamp(d, -4, 4);
+  let d = 2 * (net / sets - expectedNet(attr, A)) * c * f;
+  d = clamp(d, -4 * f, 4 * f);
   d *= d > 0 ? Math.min(1, (99 - A) / 20) : Math.min(1, (A - 40) / 20);
   return d;
 }
@@ -449,7 +457,8 @@ function emptyTot() {
 }
 
 // Calcula o resultado de um jogo sem gravar nada.
-function computeResult(game, playersById) {
+function computeResult(game, playersById, opts = {}) {
+  const calib = opts.calib || {};
   const teams = game.teams || [];
   const teamOf = {};
   teams.forEach((t, i) => t.forEach(pid => { if (playersById[pid]) teamOf[pid] = i; }));
@@ -481,7 +490,7 @@ function computeResult(game, playersById) {
         if (sp[pid] == null || !active(pid, i)) continue;
         sp[pid] += 1;
         if (mine > theirs) sw[pid] += 1;
-        formaD[pid] += d;
+        formaD[pid] += d * (calib[pid] || 1);
       }
     }
   });
@@ -500,7 +509,7 @@ function computeResult(game, playersById) {
         if (!eligible(attr, p, c)) continue;
         let net = 0;
         for (const k of EVENT_KEYS) if (EVENTS[k].attr === attr) net += EVENTS[k].sign * (c[k] || 0);
-        const d = statDelta(attr, atBefore[attr], net, sets);
+        const d = statDelta(attr, atBefore[attr], net, sets, calib[pid] || 1);
         atAfter[attr] = r1(clamp(atBefore[attr] + d, 40, 99));
         why[attr] = { net, perSet: net / sets, expected: expectedNet(attr, atBefore[attr]), d };
       }
@@ -550,10 +559,10 @@ function computeResult(game, playersById) {
 
 // ---------- Sorteio equilibrado ----------
 const POS_GROUPS = [
-  { pos: ['lev'], w: 3 },
-  { pos: ['cen'], w: 1.5 },
-  { pos: ['lib'], w: 1 },
-  { pos: ['pon', 'opo'], w: 1 }
+  { key: 'lev', pos: ['lev'], w: 3 },
+  { key: 'cen', pos: ['cen'], w: 1.5 },
+  { key: 'lib', pos: ['lib'], w: 1 },
+  { key: 'atk', pos: ['pon', 'opo'], w: 1 }
 ];
 function teamSizes(n, T) {
   const base = Math.floor(n / T), extra = n % T;
@@ -563,9 +572,15 @@ function costOf(teams, info) {
   const means = teams.map(t => t.reduce((s, id) => s + info[id].ovr, 0) / (t.length || 1));
   let cost = Math.max(...means) - Math.min(...means);
   for (const g of POS_GROUPS) {
-    const cnt = teams.map(t => t.filter(id => g.pos.includes(info[id].pos)).length);
-    const spread = Math.max(...cnt) - Math.min(...cnt);
+    const prim = teams.map(t => t.filter(id => g.pos.includes(info[id].pos)).length);
+    const flex = teams.map(t => t.filter(id => !g.pos.includes(info[id].pos) && (info[id].pos2 || []).some(x => g.pos.includes(x))).length);
+    const cov = prim.map((v, i) => v + 0.5 * flex[i]);
+    const spread = Math.max(...cov) - Math.min(...cov);
     if (spread > 1) cost += (spread - 1) * g.w;
+    if (g.key === 'lev') {
+      const able = prim.map((v, i) => v + flex[i]);
+      if (able.reduce((a, b) => a + b, 0) >= teams.length) cost += able.filter(v => v === 0).length * 3;
+    }
   }
   return cost;
 }
@@ -634,7 +649,61 @@ function balanceTeams(list, T, rnd = Math.random) {
   return { teams: pick.teams.map(t => t.slice().sort((a, b) => info[b].ovr - info[a].ovr)), cost: pick.cost, best: bestCost, options: pool.length };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { ovrRaw, ATTRS, ATTR, POS, EVENTS, EVENT_KEYS, TIERS, starsToAttr, tecnica, ovrOf, tierOf, expectedNet, statDelta, setFormaDelta, computeResult, balanceTeams, costOf, teamSizes, emptyTot, countsFromLog, clamp, r1 };
+// ---------- Cartas recalculadas a partir do histórico ----------
+const CALIB = [2.0, 1.8, 1.6, 1.4, 1.2];
+const calibOf = n => n < CALIB.length ? CALIB[n] : 1;
+const pad2 = n => String(n).padStart(2, '0');
+function localKey(ms) { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+function validSet(g, s) {
+  if (!s || s.pa == null || s.pb == null || s.pa === '' || s.pb === '') return false;
+  const pa = Number(s.pa), pb = Number(s.pb);
+  return Number.isFinite(pa) && Number.isFinite(pb) && pa !== pb && s.a != null && s.b != null && s.a !== s.b && !!(g.teams && g.teams[s.a] && g.teams[s.b]);
+}
+function hasResult(g) { return !!(g && g.teams && g.teams.length >= 2 && (g.sets || []).some(s => validSet(g, s))); }
+function replay(players, games) {
+  const cards = {}, results = {};
+  for (const p of players) {
+    const at = {};
+    for (const a of ATTRS) at[a] = clamp(p.base && p.base.at && typeof p.base.at[a] === 'number' ? p.base.at[a] : 60, 40, 99);
+    const st = { id: p.id, pos: p.pos, pos2: p.pos2 || [], at, forma: 0, n: 0, tot: emptyTot(), hist: [], last: null };
+    st.forma = p.base && typeof p.base.forma === 'number' ? clamp(p.base.forma, 40, 99) : tecnica(st);
+    st.hist.push({ g: null, d: p.created ? localKey(p.created).slice(0, 10) : '', ovr: ovrOf(st), nota: null });
+    cards[p.id] = st;
+  }
+  const evs = [];
+  for (const g of games) if (hasResult(g)) evs.push({ key: `${g.date}T${g.time || '00:00'}`, tie: g.created || 0, g });
+  for (const p of players) for (const a of (p.adj || [])) evs.push({ key: localKey(a.t), tie: a.t, p, a });
+  evs.sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : x.tie - y.tie));
+  for (const ev of evs) {
+    if (ev.a) {
+      const st = cards[ev.p.id];
+      if (!st) continue;
+      for (const k of ATTRS) if (ev.a.at && typeof ev.a.at[k] === 'number') st.at[k] = clamp(ev.a.at[k], 40, 99);
+      if (typeof ev.a.forma === 'number') st.forma = clamp(ev.a.forma, 40, 99);
+      continue;
+    }
+    const g = ev.g, calib = {};
+    for (const id of Object.keys(cards)) calib[id] = calibOf(cards[id].n);
+    const res = computeResult(g, cards, { calib });
+    results[g.id] = res;
+    const track = g.track || [];
+    for (const [pid, r] of Object.entries(res.players)) {
+      const st = cards[pid];
+      st.at = { ...r.atAfter }; st.forma = r.formaAfter;
+      st.tot.jogos += 1; st.tot.sets += r.sets; st.tot.setsV += r.won;
+      for (const k of EVENT_KEYS) if (track.includes(EVENTS[k].attr)) st.tot[k] += (r.counts[k] || 0);
+      if (r.nota != null) { st.tot.notaSum = r1(st.tot.notaSum + r.nota); st.tot.notaN += 1; }
+      if (res.mvp === pid) st.tot.mvp += 1;
+      if (r.sets > 0) st.n += 1;
+      st.hist.push({ g: g.id, d: g.date, ovr: r.ovrAfter, nota: r.nota });
+      st.last = { g: g.id, d: r.ovrAfter - r.ovrBefore };
+    }
+  }
+  for (const st of Object.values(cards)) { if (st.hist.length > 60) st.hist = st.hist.slice(-60); st.calib = st.n < CALIB.length; }
+  return { cards, results };
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { replay, hasResult, validSet, calibOf, CALIB, localKey, ovrRaw, ATTRS, ATTR, POS, EVENTS, EVENT_KEYS, TIERS, starsToAttr, tecnica, ovrOf, tierOf, expectedNet, statDelta, setFormaDelta, computeResult, balanceTeams, costOf, teamSizes, emptyTot, countsFromLog, clamp, r1 };
 
 // ================= App =================
 const $ = (s, r = document) => r.querySelector(s);
@@ -650,6 +719,24 @@ const TEAMS = [
   { name: 'Verde', c: '#2FB673' },
   { name: 'Laranja', c: '#F06B2E' }
 ];
+const LEVELS = {
+  ini: { name: 'Iniciante', base: 52, desc: 'Está aprendendo e ainda erra o básico com frequência.' },
+  exp: { name: 'Experiente', base: 66, desc: 'Joga há um tempo e domina o básico.' },
+  ava: { name: 'Avançado', base: 78, desc: 'Joga bem e já jogou em time ou campeonato.' }
+};
+const POS_OFFSET = {
+  lev: { lev: 8, def: 2, ata: -4, blo: -4 },
+  pon: { ata: 4, rec: 4, lev: -4 },
+  cen: { blo: 8, ata: 4, rec: -6, def: -2, lev: -4 },
+  opo: { ata: 8, blo: 4, rec: -4, lev: -4 },
+  lib: { rec: 8, def: 8, ata: -10, blo: -10 },
+  cor: {}
+};
+function presetAt(level, pos) {
+  const b = (LEVELS[level] || LEVELS.exp).base, off = POS_OFFSET[pos] || {}, at = {};
+  for (const a of ATTRS) at[a] = clamp(b + (off[a] || 0), 40, 90);
+  return at;
+}
 const EV_PL = { ace: ['ace', 'aces'], es: ['erro de saque', 'erros de saque'], ep: ['erro de passe', 'erros de passe'], el: ['erro de levantamento', 'erros de levantamento'], ap: ['ponto de ataque', 'pontos de ataque'], ea: ['erro de ataque', 'erros de ataque'], bl: ['ponto de bloqueio', 'pontos de bloqueio'], df: ['defesa', 'defesas'] };
 const EV_SHORT = { ace: 'Ace', es: 'Err saq', ep: 'Err pas', el: 'Err lev', ap: 'Pts ata', ea: 'Err ata', bl: 'Bloq', df: 'Def' };
 const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -690,22 +777,25 @@ const LS_KEY = 'manchete:v1';
 const PHOTO_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
 const numOr = (v, d) => (typeof v === 'number' && Number.isFinite(v)) ? v : d;
 const str = (v, max = 80) => (typeof v === 'string' ? v : '').slice(0, max);
+const cleanAt = (o, max = 99) => { const at = {}; for (const a of ATTRS) at[a] = clamp(numOr(o && o[a], 60), 40, max); return at; };
 function cleanPlayer(id, d) {
   d = d || {};
-  const at = {};
-  for (const a of ATTRS) at[a] = clamp(numOr(d.at && d.at[a], 60), 40, 99);
+  const pos = POS[d.pos] ? d.pos : 'cor';
   const p = {
-    id, name: str(d.name, 60) || 'Sem nome', nick: str(d.nick, 16), pos: POS[d.pos] ? d.pos : 'cor', at,
+    id, name: str(d.name, 60) || 'Sem nome', nick: str(d.nick, 16), pos,
+    pos2: Array.isArray(d.pos2) ? [...new Set(d.pos2.filter(x => POS[x] && x !== pos))].slice(0, 2) : [],
+    level: LEVELS[d.level] ? d.level : null,
     photo: (typeof d.photo === 'string' && d.photo.length < 200000 && PHOTO_RE.test(d.photo)) ? d.photo : '',
-    created: numOr(d.created, 0), updated: numOr(d.updated, 0)
+    created: numOr(d.created, 0), updated: numOr(d.updated, 0),
+    base: d.base && typeof d.base === 'object' && d.base.at ? { at: cleanAt(d.base.at), forma: typeof d.base.forma === 'number' ? clamp(d.base.forma, 40, 99) : null } : null,
+    adj: Array.isArray(d.adj) ? d.adj.filter(x => x && typeof x.t === 'number').slice(-200).map(x => {
+      const o = { t: x.t, at: {} };
+      if (x.at && typeof x.at === 'object') for (const a of ATTRS) if (typeof x.at[a] === 'number') o.at[a] = clamp(Math.round(x.at[a] * 10) / 10, 40, 99);
+      if (typeof x.forma === 'number') o.forma = clamp(x.forma, 40, 99);
+      return o;
+    }) : []
   };
-  p.forma = clamp(numOr(d.forma, tecnica(p)), 40, 99);
-  const tot = emptyTot();
-  if (d.tot && typeof d.tot === 'object') for (const k of Object.keys(tot)) tot[k] = numOr(d.tot[k], 0);
-  p.tot = tot;
-  p.hist = Array.isArray(d.hist) ? d.hist.filter(h => h && typeof h.ovr === 'number').slice(-50)
-    .map(h => ({ g: typeof h.g === 'string' ? h.g : null, d: str(h.d, 10), ovr: h.ovr, nota: typeof h.nota === 'number' ? h.nota : null })) : [];
-  p.last = d.last && typeof d.last.g === 'string' ? { g: d.last.g, d: numOr(d.last.d, 0) } : null;
+  if (!p.base) p.legacy = { at: cleanAt(d.at), forma: typeof d.forma === 'number' ? clamp(d.forma, 40, 99) : null };
   return p;
 }
 function cleanGame(id, d) {
@@ -717,7 +807,7 @@ function cleanGame(id, d) {
     time: /^\d{2}:\d{2}$/.test(d.time) ? d.time : '20:00',
     place: str(d.place, 80), note: str(d.note, 300),
     max: clamp(Math.round(numOr(d.max, 0)), 0, 60),
-    status: d.status === 'finalizado' ? 'finalizado' : 'agendado',
+    status: d.status === 'encerrado' || d.status === 'finalizado' ? 'encerrado' : 'agendado',
     conf: ids(d.conf), paid: ids(d.paid),
     nTeams: clamp(Math.round(numOr(d.nTeams, 2)), 2, 4),
     teams: Array.isArray(d.teams) && d.teams.length ? d.teams.slice(0, 4).map(ids) : null,
@@ -727,17 +817,65 @@ function cleanGame(id, d) {
       pa: s && typeof s.pa === 'number' ? s.pa : null, pb: s && typeof s.pb === 'number' ? s.pb : null
     })) : [],
     log: Array.isArray(d.log) ? d.log.filter(e => e && typeof e.p === 'string' && EVENTS[e.e]).slice(-3000).map(e => ({ p: e.p, e: e.e, t: numOr(e.t, 0) })) : [],
-    res: d.res && typeof d.res === 'object' ? d.res : null,
     created: numOr(d.created, 0), finishedAt: numOr(d.finishedAt, 0)
   };
   const idxMap = o => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && v >= 0 && v <= 60) r[k] = Math.round(v); return r; };
   g.join = idxMap(d.join); g.leave = idxMap(d.leave);
-  if (g.status !== 'finalizado') g.res = null;
+  if (d.status === 'finalizado' && d.res && d.res.before && typeof d.res.before === 'object') g.legacyBefore = d.res.before;
   return g;
+}
+
+// ---------- Cartas: recalculadas a partir dos jogos ----------
+let DER = null, DER_DIRTY = true;
+const dirty = () => { DER_DIRTY = true; };
+function D() {
+  if (!DER || DER_DIRTY) {
+    const raw = Object.values(S.players);
+    const r = replay(raw, Object.values(S.games));
+    const view = {};
+    for (const p of raw) { const c = r.cards[p.id]; view[p.id] = Object.assign({}, p, { at: c.at, forma: c.forma, n: c.n, tot: c.tot, hist: c.hist, last: c.last, calib: c.calib }); }
+    DER = { view, results: r.results };
+    DER_DIRTY = false;
+  }
+  return DER;
+}
+// Um ajuste feito agora vale depois de todos os jogos que já têm placar, mesmo os marcados para mais tarde no mesmo dia.
+function adjTime() {
+  let t = Date.now();
+  for (const g of Object.values(S.games)) if (hasResult(g)) { const ms = new Date(`${g.date}T${g.time || '00:00'}`).getTime(); if (Number.isFinite(ms)) t = Math.max(t, ms + 60000); }
+  return t;
+}
+// Converte dados da versão anterior (carta gravada) para o formato novo (carta recalculada), sem mudar nenhum número.
+function upgradeData() {
+  const up = Object.values(S.players).filter(p => !p.base);
+  const oldGames = Object.values(S.games).filter(g => g.legacyBefore);
+  if (!up.length && !oldGames.length) return;
+  const games = Object.values(S.games).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  for (const p of up) {
+    let before = null;
+    for (const g of games) { const b = g.legacyBefore && g.legacyBefore[p.id]; if (b && b.at) { before = b; break; } }
+    p.base = { at: cleanAt(before ? before.at : p.legacy.at), forma: before && typeof before.forma === 'number' ? before.forma : p.legacy.forma };
+    p.adj = p.adj || [];
+  }
+  dirty();
+  const d = D();
+  const now = adjTime();
+  for (const p of up) {
+    const c = d.view[p.id], fix = { t: now, at: {} };
+    let need = false;
+    for (const a of ATTRS) if (Math.abs(c.at[a] - p.legacy.at[a]) > 0.05) { fix.at[a] = p.legacy.at[a]; need = true; }
+    if (typeof p.legacy.forma === 'number' && Math.abs(c.forma - p.legacy.forma) > 0.05) { fix.forma = p.legacy.forma; need = true; }
+    if (need) p.adj.push(fix);
+    delete p.legacy;
+    persist('players', p.id);
+  }
+  for (const g of oldGames) { delete g.legacyBefore; persist('games', g.id); }
+  dirty();
 }
 
 // ---------- Gravação ----------
 function persist(kind, id, delay = 0) {
+  dirty();
   if (!S.canWrite) return;
   if (S.mode === 'local') return saveLocalSoon();
   if (S.mode !== 'cloud') return;
@@ -768,13 +906,19 @@ async function flush(key) {
   if (st.dirty) flush(key); else delete PEND[key];
 }
 let localTimer = null;
-function saveLocalSoon() {
-  clearTimeout(localTimer);
-  localTimer = setTimeout(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify({ players: S.players, games: S.games })); }
-    catch (e) { toast('Não consegui salvar neste aparelho.'); }
-  }, 250);
+function saveLocalNow() {
+  clearTimeout(localTimer); localTimer = null;
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ players: S.players, games: S.games })); }
+  catch (e) { toast('Não consegui salvar neste aparelho.'); }
 }
+function saveLocalSoon() { clearTimeout(localTimer); localTimer = setTimeout(saveLocalNow, 250); }
+// Ao sair do app (trocar de app, bloquear a tela), grava na hora o que ainda estava esperando.
+function flushAll() {
+  if (localTimer) saveLocalNow();
+  for (const [key, st] of Object.entries(PEND)) if (st.timer && st.dirty && !st.saving) { clearTimeout(st.timer); flush(key); }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAll(); });
+window.addEventListener('pagehide', flushAll);
 function readLocal() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -791,6 +935,7 @@ function startLocal() {
   S.mode = 'local'; S.canWrite = true;
   const d = readLocal();
   if (d) { S.players = d.players; S.games = d.games; }
+  dirty(); upgradeData();
   render();
 }
 function applySnapshot(kind, snap) {
@@ -805,6 +950,7 @@ function applySnapshot(kind, snap) {
     if (S[kind][id]) map[id] = S[kind][id]; else delete map[id];
   }
   S[kind] = map;
+  dirty();
 }
 function subscribe() {
   const got = { players: false, games: false }, firm = { players: false, games: false };
@@ -814,6 +960,7 @@ function subscribe() {
       got[kind] = true;
       if (!snap.metadata.fromCache) firm[kind] = true;
       if (got.players && got.games && S.mode === 'loading-cloud') S.mode = 'cloud';
+      if (got.players && got.games && S.mode === 'cloud') upgradeData();
       if (firm.players && firm.games) checkMigration();
       if (S.mode === 'cloud') render();
     }, err => {
@@ -840,6 +987,7 @@ async function migrate() {
   try {
     for (const [id, p] of Object.entries(d.players)) { S.players[id] = p; await S.db.doc('players/' + id).set(clone(p)); }
     for (const [id, g] of Object.entries(d.games)) { S.games[id] = g; await S.db.doc('games/' + id).set(clone(g)); }
+    upgradeData();
     try { localStorage.setItem(LS_KEY + ':backup', localStorage.getItem(LS_KEY)); localStorage.removeItem(LS_KEY); } catch (e) { }
     toast('Pronto, os dados estão na nuvem.');
   } catch (e) { toast('Não consegui enviar tudo. Tente de novo.'); S.migrateOffer = true; }
@@ -862,7 +1010,10 @@ async function boot() {
 }
 
 // ---------- Ajudantes de domínio ----------
-const P = id => S.players[id];
+const P = id => S.players[id] ? D().view[id] : undefined;
+const RAW = id => S.players[id];
+const resultOf = g => (g && D().results[g.id]) || null;
+const posLabel = p => { const m = (POS[p.pos] || POS.cor).name; const o = (p.pos2 || []).map(k => POS[k].name.toLowerCase()); return o.length ? `${m}, também ${o.join(' e ')}` : m; };
 const nameOf = id => { const p = P(id); return p ? (p.nick || p.name) : 'Jogador removido'; };
 function initials(p) { const parts = (p.name || p.nick || '?').trim().split(/\s+/); return ((parts[0] || '?')[0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase(); }
 function avatar(p) { if (!p) return '<span class="av">?</span>'; return `<span class="av">${p.photo ? `<img src="${p.photo}" alt="">` : esc(initials(p))}</span>`; }
@@ -870,15 +1021,15 @@ const curGame = () => S.ui.gameId ? S.games[S.ui.gameId] : null;
 const playingIds = g => g.conf.filter(id => P(id)).slice(0, g.max || undefined);
 const teamIds = g => (g.teams || []).flat();
 const byDate = (a, b) => (a.date + a.time).localeCompare(b.date + b.time);
-function latestFinal() {
+function latestResult() {
   let best = null;
   for (const g of Object.values(S.games)) {
-    if (g.status !== 'finalizado') continue;
-    if (!best || (g.date + pad(g.finishedAt)) > (best.date + pad(best.finishedAt))) best = g;
+    if (!resultOf(g)) continue;
+    if (!best || (g.date + g.time + pad(g.created)) > (best.date + best.time + pad(best.created))) best = g;
   }
   return best;
 }
-function mvpId() { const g = latestFinal(); const m = g && g.res && g.res.mvp; return m && P(m) ? m : null; }
+function mvpId() { const g = latestResult(); const m = g && resultOf(g).mvp; return m && P(m) ? m : null; }
 function scoreline(g) {
   const T = (g.teams || []).length;
   if (!T) return null;
@@ -893,12 +1044,14 @@ function scoreline(g) {
   if (T === 2) return `${TEAMS[0].name} ${wins[0]} x ${wins[1]} ${TEAMS[1].name}`;
   return wins.map((w, i) => `${TEAMS[i].name} ${w}`).join(', ');
 }
-function teamAvg(ids) { const v = ids.filter(P).map(id => ovrOf(P(id))); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; }
+function ovrIn(g, id) { const r = resultOf(g); const row = r && r.players[id]; return row ? row.ovrBefore : ovrOf(P(id)); }
+function teamAvg(ids, g) { const v = ids.filter(P).map(id => g ? ovrIn(g, id) : ovrOf(P(id))); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; }
 
 // ---------- Componentes ----------
 function cardHTML(p, opt = {}) {
   const ovr = ovrOf(p);
-  const tier = opt.destaque ? { key: 'destaque', name: 'Destaque da rodada' } : tierOf(ovr);
+  const t0 = tierOf(ovr);
+  const tier = opt.destaque ? { key: 'destaque', name: 'Destaque da rodada' } : { key: t0.key, name: p.calib && !opt.noCalib ? `${t0.name} em calibração` : t0.name };
   const pos = POS[p.pos] || POS.cor;
   const tr = p.last && p.last.d ? `<span class="trend">${p.last.d > 0 ? '▲' : '▼'}${Math.abs(p.last.d)}</span>` : '';
   const ph = p.photo ? `<img src="${p.photo}" alt="">` : `<span>${esc(initials(p))}</span>`;
@@ -914,10 +1067,11 @@ const section = (title, inner, extra = '') => `<h2 class="h-sec">${esc(title)}</
 const listBox = items => `<div class="list">${items.join('')}</div>`;
 function gameRow(g) {
   const d = parseDate(g.date);
-  const sl = g.status === 'finalizado' ? scoreline(g) : null;
-  const mvp = g.res && g.res.mvp ? nameOf(g.res.mvp) : null;
+  const res = resultOf(g);
+  const sl = res ? scoreline(g) : null;
+  const mvp = res && res.mvp && P(res.mvp) ? nameOf(res.mvp) : null;
   const past = g.date < todayStr();
-  const pill = g.status === 'finalizado' ? '<span class="pill pill-done">Finalizado</span>' : (past ? '<span class="pill">Não finalizado</span>' : `<span class="pill">${plural(g.conf.filter(P).length, 'confirmado', 'confirmados')}</span>`);
+  const pill = g.status === 'encerrado' ? '<span class="pill pill-done">Encerrado</span>' : res ? '<span class="pill">Placar lançado</span>' : (past ? '<span class="pill">Sem placar</span>' : `<span class="pill">${plural(g.conf.filter(P).length, 'confirmado', 'confirmados')}</span>`);
   const sub = sl ? esc(sl) + (mvp ? `<br>MVP: ${esc(mvp)}` : '') : esc(g.place || 'Local a definir');
   return `<button class="item" data-act="openGame" data-id="${esc(g.id)}">
     <div class="date-box"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></div>
@@ -961,7 +1115,7 @@ function viewHTML() {
   if (S.loadErr && S.mode === 'loading-cloud') return `<div class="empty" style="margin-top:16px"><h3>Não consegui carregar</h3><p class="sub">Os dados da galera não chegaram. Confira a internet e tente de novo.</p><button class="btn btn-ball" data-act="reload">Tentar de novo</button></div>`;
   if (S.mode === 'loading' || S.mode === 'loading-cloud') return `<div class="loading">Carregando a quadra…</div>`;
   const g = curGame();
-  if (g) return g.status === 'finalizado' ? finalView(g) : gameView(g);
+  if (g) return g.status === 'encerrado' ? finalView(g) : gameView(g);
   if (S.ui.tab === 'elenco') return elencoView();
   if (S.ui.tab === 'ranking') return rankingView();
   return agendaView();
@@ -970,8 +1124,8 @@ function viewHTML() {
 function agendaView() {
   const t = todayStr();
   const all = Object.values(S.games);
-  const up = all.filter(g => g.status !== 'finalizado' && g.date >= t).sort(byDate);
-  const past = all.filter(g => !(g.status !== 'finalizado' && g.date >= t)).sort((a, b) => byDate(b, a));
+  const up = all.filter(g => g.status !== 'encerrado' && g.date >= t).sort(byDate);
+  const past = all.filter(g => !(g.status !== 'encerrado' && g.date >= t)).sort((a, b) => byDate(b, a));
   let h = banners();
   if (up[0]) h += heroHTML(up[0]);
   else h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${S.canWrite ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
@@ -996,7 +1150,7 @@ function heroHTML(g) {
 }
 
 function elencoView() {
-  const ps = Object.values(S.players);
+  const ps = Object.keys(S.players).map(P);
   let h = banners();
   if (!ps.length) {
     return h + `<div class="empty" style="margin-top:16px"><h3>Ninguém no elenco</h3><p class="sub">Cadastre cada jogador com uma nota de 40 a 90 em cada fundamento. A carta nasce daí e evolui a cada jogo.</p>${S.canWrite ? `<button class="btn btn-ball" data-act="newPlayer">${ICON.plus}Novo jogador</button>` : ''}</div>`;
@@ -1012,7 +1166,7 @@ function elencoView() {
 }
 
 function rankingView() {
-  const ps = Object.values(S.players);
+  const ps = Object.keys(S.players).map(P);
   if (!ps.length) return banners() + `<div class="empty" style="margin-top:16px"><h3>Ranking vazio</h3><p class="sub">O ranking aparece quando o elenco tiver jogadores.</p></div>`;
   const pct = p => p.tot.sets ? p.tot.setsV / p.tot.sets : -1;
   const avg = p => p.tot.notaN ? p.tot.notaSum / p.tot.notaN : -1;
@@ -1028,7 +1182,7 @@ function rankingView() {
   </tr>`).join('');
   return banners() + `<div class="row-wrap" style="margin:16px 0 12px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Nota')}${chip('pres', 'Presença')}</div>
   <div class="tbl-wrap"><table class="rank-tbl"><thead><tr><th>Jogador</th><th>Geral</th><th>Jogos</th><th>Vit.</th><th>Nota</th></tr></thead><tbody>${rows}</tbody></table></div>
-  <p class="sub small" style="margin-top:10px">Vit. é a porcentagem de sets vencidos. Nota é a média das notas de 0 a 10 dos jogos finalizados.</p>`;
+  <p class="sub small" style="margin-top:10px">Vit. é a porcentagem de sets vencidos. Nota é a média das notas de 0 a 10 dos jogos com placar.</p>`;
 }
 
 // ---------- Jogo ----------
@@ -1055,7 +1209,7 @@ function presencaStep(g, confN) {
   const W = S.canWrite;
   const conf = g.conf.filter(P);
   const confSet = new Set(conf);
-  const others = Object.values(S.players).filter(p => !confSet.has(p.id)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
+  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
   const max = g.max || Infinity;
   const wait = Math.max(0, conf.length - max);
   const paid = g.paid.filter(id => confSet.has(id)).length;
@@ -1063,7 +1217,7 @@ function presencaStep(g, confN) {
   h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm" data-act="copyInvite">${ICON.copy}Copiar convite</button>${W && Object.keys(S.players).length ? `<button class="btn btn-sm" data-act="pasteList">${ICON.paste}Colar lista do grupo</button>` : ''}<a class="btn btn-sm" href="${esc(gcalUrl(g))}" target="_blank" rel="noopener">${ICON.cal}Google Agenda</a></div>`;
   const row = (p, i, on) => `<div class="pres">
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
-    <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${(POS[p.pos] || POS.cor).name}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
+    <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
     ${on && W ? `<button class="paid" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(p.nick || p.name)} pagou">${g.paid.includes(p.id) ? 'Pagou' : 'Pagou?'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
     ${W ? `<button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Vai' : 'Confirmar'}</button>` : ''}
   </div>`;
@@ -1091,7 +1245,7 @@ function timesStep(g) {
   const started = g.sets.length > 0;
   if (changed) h += `<div class="banner" style="background:transparent;border:1px solid var(--zone)">${started ? 'Chegou gente depois do sorteio. Coloque cada um num time: conta a partir do próximo set.' : 'A presença mudou depois do sorteio. Sorteie de novo ou coloque quem chegou num time.'}</div>`;
   if (W && lateIds.length) h += section(lateIds.length === 1 ? 'Chegou depois' : 'Chegaram depois', listBox(lateIds.map(id => `<div class="pres"><div class="item-main"><div class="item-title">${esc(nameOf(id))} <span class="num pres-ovr">${ovrOf(P(id))}</span></div><div class="item-sub">Entra a partir do set ${g.sets.length + 1}</div></div><div class="row-wrap">${g.teams.map((_, i) => `<button class="join-btn" style="--tc:${TEAMS[i].c}" data-act="lateJoin" data-pid="${esc(id)}" data-team="${i}" aria-label="Colocar ${esc(nameOf(id))} no time ${TEAMS[i].name.toLowerCase()}">${TEAMS[i].name}</button>`).join('')}</div></div>`)));
-  const avgs = g.teams.map(teamAvg);
+  const avgs = g.teams.map(t => teamAvg(t, g));
   const diff = Math.max(...avgs) - Math.min(...avgs);
   h += `<p class="sub" style="margin:12px 0">Diferença entre as médias: <b class="num" style="font-size:18px;color:var(--ink)">${fmtN(diff)}</b> ${diff < 1.05 && diff > 0.95 ? 'ponto' : 'pontos'}.${W ? (started ? ' Se alguém for embora, toque no nome dele para os próximos sets não contarem.' : ' Toque em dois jogadores de times diferentes para trocar.') : ''}</p>`;
   h += `<div class="teams">${g.teams.map((t, i) => `<div class="team">
@@ -1099,7 +1253,7 @@ function timesStep(g) {
     ${t.filter(P).map(id => {
       const p = P(id), out = g.leave[id] != null, jn = g.join[id];
       const tag = out ? `<span class="tp-tag">saiu depois do set ${g.leave[id]}</span>` : (jn ? `<span class="tp-tag">entrou no set ${jn + 1}</span>` : '');
-      return `<button class="tp ${out ? 'tp-out' : ''}" data-act="${started ? 'leaveAsk' : 'swapPick'}" data-pid="${esc(id)}" aria-pressed="${!started && S.ui.swapSel === id}" ${W ? '' : 'disabled'}><span class="tp-pos">${(POS[p.pos] || POS.cor).abbr}</span><span class="tp-name">${esc(p.nick || p.name)}${tag}</span><span class="tp-ovr">${ovrOf(p)}</span></button>`;
+      return `<button class="tp ${out ? 'tp-out' : ''}" data-act="${started ? 'leaveAsk' : 'swapPick'}" data-pid="${esc(id)}" aria-pressed="${!started && S.ui.swapSel === id}" ${W ? '' : 'disabled'}><span class="tp-pos">${(POS[p.pos] || POS.cor).abbr}</span><span class="tp-name">${esc(p.nick || p.name)}${tag}</span><span class="tp-ovr">${Math.round(ovrIn(g, id))}</span></button>`;
     }).join('')}
   </div>`).join('')}</div>`;
   h += `<div class="row-wrap" style="margin-top:12px"><button class="btn btn-sm" data-act="copyTeams">${ICON.copy}Copiar times</button><button class="btn btn-sm" data-act="step" data-step="sumula">Ir para a súmula</button></div>`;
@@ -1159,11 +1313,11 @@ function placarStep(g) {
       <div class="set-side m-pa"><span class="team-dot" style="background:${TEAMS[s.a].c}"></span>${inp('pa', s.pa, TEAMS[s.a].name)}</div><div class="set-side m-pb"><span class="team-dot" style="background:${TEAMS[s.b].c}"></span>${inp('pb', s.pb, TEAMS[s.b].name)}</div>
     </div>`;
   }).join('');
-  let h = `<p class="sub" style="margin:12px 0">Anote o placar de cada set. Ganhar de time mais forte vale mais forma do que ganhar de time mais fraco.</p>`;
+  let h = `<p class="sub" style="margin:12px 0">Os pontos entram nas cartas assim que você anota o placar. Errou um número? É só corrigir que as cartas se ajustam sozinhas.</p>`;
   h += g.sets.length ? listBox([rows]) : `<div class="empty"><p class="sub" style="margin:0">Nenhum set ainda.</p></div>`;
   if (W) h += `<div style="margin-top:10px"><button class="btn btn-block" data-act="addSet">${ICON.plus}Adicionar set</button></div>`;
   h += `<div class="total" id="setTotal">${esc(scoreline(g) || '')}</div>`;
-  if (W) h += `<div style="margin-top:8px"><button class="btn btn-block btn-ball" data-act="preview">Ver relatório e finalizar</button></div>`;
+  if (W) h += `<div style="margin-top:8px"><button class="btn btn-block btn-ball" data-act="preview">Ver relatório e encerrar</button></div>`;
   return h;
 }
 
@@ -1204,15 +1358,15 @@ function reportBody(rows, mvp, awards, ctx) {
   return h;
 }
 function finalView(g) {
-  const res = g.res || {};
-  const rows = res.rows && typeof res.rows === 'object' ? res.rows : {};
+  const res = resultOf(g) || { players: {}, awards: [], mvp: null };
+  const rows = res.players;
   let h = gameHead(g);
   h += `<div class="board" style="padding:16px"><div class="board-label">Resultado</div><div class="board-day" style="font-size:30px;margin-top:4px">${esc(scoreline(g) || 'Sem placar')}</div>
     <div class="board-place" style="margin:6px 0 0">${g.sets.filter(s => s.pa != null && s.pb != null).map(s => `${s.pa}–${s.pb}`).join(', ')}</div></div>`;
   h += reportBody(rows, res.mvp, res.awards, 'final');
-  if (g.teams) h += section('Times', `<div class="teams">${g.teams.map((t, i) => `<div class="team"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span></div>${t.map(id => `<div class="tp"><span class="tp-name">${esc(nameOf(id))}</span><span class="tp-ovr">${rows[id] ? rows[id].ovrAfter : ''}</span></div>`).join('')}</div>`).join('')}</div>`);
+  if (g.teams) h += section('Times', `<div class="teams">${g.teams.map((t, i) => `<div class="team"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span></div>${t.map(id => `<div class="tp"><span class="tp-name">${esc(nameOf(id))}</span><span class="tp-ovr">${rows[id] ? rows[id].ovrAfter : ''}</span></div>`).join('')}</div>`).join('')}</div>`, `<p class="sub small" style="margin:-4px 0 10px">Geral de cada um logo depois deste jogo.</p>`);
   h += `<div class="row-wrap" style="margin-top:16px"><button class="btn btn-sm" data-act="copyResult">${ICON.copy}Copiar resultado</button></div>`;
-  if (S.canWrite) h += `<div style="margin-top:12px;display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="nextWeek">${ICON.plus}Marcar o mesmo jogo na semana que vem</button><button class="btn btn-block btn-danger" data-act="askUndoFinal">${ICON.undo}Desfazer finalização</button></div>`;
+  if (S.canWrite) h += `<div style="margin-top:12px;display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="nextWeek">${ICON.plus}Marcar o mesmo jogo na semana que vem</button><button class="btn btn-block" data-act="reopen">${ICON.undo}Reabrir para corrigir</button></div>`;
   return h;
 }
 
@@ -1254,14 +1408,16 @@ function helpHTML() {
   return `<div class="help">
   <p>Cada jogador tem uma carta. O número grande é o geral, que junta a técnica (70%) e a forma (30%).</p>
   <h3>Técnica</h3><p>São os seis fundamentos: saque, recepção, levantamento, ataque, bloqueio e defesa. Cada posição pesa os fundamentos de um jeito. No levantador, o levantamento vale 45% da técnica. No central, o bloqueio vale 35%.</p>
-  <p>No cadastro, cada fundamento vai de 40 a 90. Passar de 90 e chegar a Lenda só jogando.</p>
+  <p>No cadastro você escolhe o nível de entrada, iniciante, experiente ou avançado, e as notas já vêm de acordo com a posição. Depois é só ajustar cada fundamento de 40 a 90, arrastando ou digitando. Passar de 90 e chegar a Lenda só jogando.</p>
+  <h3>Calibração</h3><p>O nível de entrada é um chute, então nos 5 primeiros jogos a carta anda mais rápido: no primeiro, o dobro do normal. Depois disso ela firma. Enquanto isso a carta mostra "em calibração".</p>
   <h3>Como a súmula mexe na carta</h3><p>No jogo você escolhe o que vai anotar e toca no jogador e no lance. No fim, o app calcula o saldo de cada um por set e compara com o esperado para o nível da carta. Quem foi melhor que o esperado sobe, quem foi pior desce. Por isso um 90 que erra um saque por set desce, e um 60 que erra o mesmo tanto mexe pouco.</p>
   <p>Só os fundamentos anotados naquele jogo mudam. Um fundamento mexe no máximo 4 pontos por jogo, e fica mais difícil subir perto do 99.</p>
   <h3>Forma</h3><p>Vem do placar dos sets. Ganhar de um time mais forte rende mais do que ganhar de um mais fraco, e lavada conta um pouco mais que set apertado. O que um time ganha, o outro perde, então a média da galera não infla.</p>
   <h3>Cores</h3><div class="tiers">${tiers}</div><p>A carta laranja é o destaque: o MVP do último jogo fica com ela até o próximo.</p>
-  <h3>Sorteio</h3><p>Com até 16 jogadores em 2 times, o app testa todas as divisões e escolhe uma das mais equilibradas pela média do geral. Com mais times, ele monta em cobrinha e testa trocas. Também evita juntar os levantadores e os centrais no mesmo time.</p>
+  <h3>Sorteio</h3><p>Com até 16 jogadores em 2 times, o app testa todas as divisões e escolhe uma das mais equilibradas pela média do geral. Com mais times, ele monta em cobrinha e testa trocas. Também evita juntar os levantadores e os centrais no mesmo time, e quem também joga em outra posição ajuda a cobrir o time que ficou sem levantador.</p>
   <h3>No dia do jogo</h3><p>Se a galera montou a lista no WhatsApp, use colar lista do grupo na presença: o app marca quem achar, na ordem da lista. Quem chega depois do primeiro set entra num time pela tela de times e só conta dali para frente. Se alguém for embora, toque no nome dele.</p>
-  <h3>Erro de lançamento</h3><p>Errou um lance? Use desfazer na súmula. Finalizou errado? No jogo finalizado tem desfazer finalização, que volta as cartas para como estavam.</p>
+  <h3>Placar</h3><p>Os pontos entram nas cartas assim que o placar é anotado. As cartas são recalculadas a partir dos jogos, então corrigir um número, até de um jogo antigo, ajusta tudo sozinho. Apagar um jogo tira o efeito dele. Encerrar só trava o jogo para ninguém mexer sem querer.</p>
+  <h3>Erro de lançamento</h3><p>Errou um lance? Use desfazer na súmula. Errou o placar? Corrija o número. Se o jogo estiver encerrado, toque em reabrir para corrigir.</p>
   <h3>Seus dados</h3><p>${S.mode === 'cloud' ? 'Os dados ficam na sua conta do Claude.' : 'Os dados ficam salvos só neste celular. Se apagar o app da Tela de Início, eles somem junto.'} O backup gera um arquivo com tudo, cartas, fotos e jogos, que você pode guardar no Arquivos ou mandar para você mesmo no WhatsApp.${lastBackup() ? ` Último backup: ${fmtDay(lastBackup()).toLowerCase()}.` : ''}</p>
   ${S.canWrite ? `<div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="backup">Salvar backup</button><button class="btn btn-block" data-act="restore">Restaurar um backup</button></div>` : ''}
   </div>`;
@@ -1293,9 +1449,9 @@ function formPlayer() {
   const nick = ($('#pNick') || {}).value || '';
   const at = {};
   for (const a of ATTRS) at[a] = f.at[a];
-  const base = f.pid ? P(f.pid) : null;
-  const p = { id: f.pid || 'novo', name: name || 'Jogador', nick: nick || name.split(' ')[0] || 'Jogador', pos: f.pos, at, photo: f.photo, last: null };
-  p.forma = base ? base.forma : tecnica(p);
+  const cur = f.pid ? P(f.pid) : null;
+  const p = { id: f.pid || 'novo', name: name || 'Jogador', nick: nick || name.split(' ')[0] || 'Jogador', pos: f.pos, pos2: f.pos2, at, photo: f.photo, last: null, calib: cur ? cur.calib : true };
+  p.forma = cur ? cur.forma : tecnica(p);
   return p;
 }
 function playerFormHTML() {
@@ -1307,12 +1463,14 @@ function playerFormHTML() {
   <div class="row-wrap" style="justify-content:center;margin-bottom:14px"><button class="btn btn-sm" data-act="pickPhoto">${f.photo ? 'Trocar foto' : 'Escolher foto'}</button>${f.photo ? '<button class="btn btn-sm btn-ghost" data-act="removePhoto">Remover foto</button>' : ''}</div>
   <label class="field"><span>Nome</span><input class="input" id="pName" maxlength="60" value="${esc(p ? p.name : '')}" data-input="pname" autocomplete="off"></label>
   <label class="field"><span>Apelido na carta</span><input class="input" id="pNick" maxlength="16" value="${esc(p ? p.nick : '')}" data-input="pname" placeholder="Opcional" autocomplete="off"></label>
-  <div class="field"><span>Posição</span><div class="pos-grid" role="group" aria-label="Posição">${Object.entries(POS).map(([k, v]) => `<button data-act="formPos" data-pos="${k}" aria-pressed="${f.pos === k}">${v.name}</button>`).join('')}</div></div>
+  <div class="field"><span>Posição principal</span><div class="pos-grid" role="group" aria-label="Posição principal">${Object.entries(POS).map(([k, v]) => `<button data-act="formPos" data-pos="${k}" aria-pressed="${f.pos === k}">${v.name}</button>`).join('')}</div></div>
+  <div class="field"><span>Também joga de</span><div class="row-wrap" role="group" aria-label="Também joga de">${Object.entries(POS).filter(([k]) => k !== f.pos && k !== 'cor').map(([k, v]) => `<button class="chip" data-act="formPos2" data-pos="${k}" aria-pressed="${f.pos2.includes(k)}">${v.name}</button>`).join('')}</div><p class="sub small" style="margin-top:6px">Opcional, até duas. A carta usa a principal, e as outras ajudam o sorteio a cobrir um time sem levantador, por exemplo.</p></div>
+  ${f.pid ? '' : `<div class="field"><span>Nível de entrada</span><div class="seg seg-full" role="group" aria-label="Nível de entrada">${Object.entries(LEVELS).map(([k, v]) => `<button data-act="formLevel" data-level="${k}" aria-pressed="${f.level === k}">${v.name}</button>`).join('')}</div><p class="sub small" style="margin-top:6px">${esc(LEVELS[f.level].desc)} As notas abaixo já vêm pela posição, e você ajusta o que quiser.</p></div>`}
   <div class="rate-block">
     <div class="live"><span class="live-label">${f.pid ? 'Ajuste fino dos fundamentos' : 'Como joga hoje'}</span><span class="live-ovr"><span class="live-sw t-${tierOf(prevOvr).key}" id="formLiveTier"></span>Geral <b id="formLiveVal">${prevOvr}</b></span></div>
     ${sliders}
   </div>
-  ${f.pid ? '<p class="sub small">Mexa só para corrigir. O normal é a carta mudar pela súmula.</p>' : '<p class="sub small">66 é o jogador mediano da galera e 90 é o craque. Na dúvida, chute para baixo: a carta se ajusta com os jogos.</p>'}
+  ${f.pid ? '<p class="sub small">Mexa só para corrigir. O normal é a carta mudar pelo placar e pela súmula. Toque no número para digitar.</p>' : '<p class="sub small">Toque no número para digitar, de 40 a 90. Na dúvida, chute para baixo: nos primeiros jogos a carta se ajusta rápido.</p>'}
   <div id="pErr" class="err" role="alert"></div>
   <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-ball" data-act="savePlayer">${f.pid ? 'Salvar jogador' : 'Criar carta'}</button>
   ${f.pid ? `<button class="btn btn-block btn-danger" data-act="askDeletePlayer" data-pid="${esc(f.pid)}">Apagar jogador</button>` : ''}</div>`;
@@ -1323,8 +1481,8 @@ function rngHTML(a, f) {
   const max = f.pid ? 99 : 90;
   const v = clamp(Math.round(f.at[a]), 40, max);
   const nudge = d => `<button class="nudge" data-act="nudge" data-nudge="${d}" data-attr="${a}" aria-label="${d > 0 ? 'Aumentar' : 'Diminuir'} ${ATTR[a].name.toLowerCase()}">${d > 0 ? '+' : '−'}</button>`;
-  return `<div class="rng-row"><div class="rng-head"><span class="rng-name" id="l_${a}">${ATTR[a].name}</span><span class="rng-val" id="o_${a}">${v}</span></div>
-    <div class="rng-line">${nudge(-1)}<div class="rng bar" role="slider" tabindex="0" id="r_${a}" data-attr="${a}" data-min="40" data-max="${max}" data-step="1" aria-labelledby="l_${a}" aria-valuemin="40" aria-valuemax="${max}" aria-valuenow="${v}" aria-valuetext="${v}" style="--p:${((v - 40) / (max - 40)).toFixed(4)}"><div class="rng-track"><div class="rng-fill"></div></div><div class="rng-thumb" aria-hidden="true"><span class="rng-bubble">${v}</span></div></div>${nudge(1)}</div></div>`;
+  return `<div class="rng-row"><div class="rng-head"><span class="rng-name" id="l_${a}">${ATTR[a].name}</span><input class="rng-num" id="o_${a}" value="${v}" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" enterkeyhint="done" data-input="num" data-attr="${a}" data-max="${max}" aria-label="Nota de ${ATTR[a].name.toLowerCase()}, de 40 a ${max}" aria-describedby="e_${a}"></div>
+    <div class="rng-line">${nudge(-1)}<div class="rng bar" role="slider" tabindex="0" id="r_${a}" data-attr="${a}" data-min="40" data-max="${max}" data-step="1" aria-labelledby="l_${a}" aria-valuemin="40" aria-valuemax="${max}" aria-valuenow="${v}" aria-valuetext="${v}" style="--p:${((v - 40) / (max - 40)).toFixed(4)}"><div class="rng-track"><div class="rng-fill"></div></div><div class="rng-thumb" aria-hidden="true"><span class="rng-bubble">${v}</span></div></div>${nudge(1)}</div><div class="rng-err" id="e_${a}" role="alert"></div></div>`;
 }
 const TIER_CLS = TIERS.map(t => 't-' + t.key).concat('t-destaque');
 function patchCard(root, p) {
@@ -1354,8 +1512,10 @@ function formValue(a) { const f = S.ui.form; return f ? Math.round(f.at[a]) : 0;
 function setFormValue(a, v) {
   const f = S.ui.form;
   if (!f) return;
-  f.at[a] = v;
-  const o = $('#o_' + a); if (o) o.textContent = valHTML(v);
+  f.at[a] = v; f.preset = false;
+  const o = $('#o_' + a);
+  if (o) { if (document.activeElement !== o) o.value = v; o.classList.remove('bad'); }
+  const er = $('#e_' + a); if (er) er.textContent = '';
   const r = $('#r_' + a); if (r) { r.setAttribute('aria-valuenow', v); r.setAttribute('aria-valuetext', rngText(v)); }
   updateFormPreview();
 }
@@ -1444,7 +1604,8 @@ function playerHTML(p) {
   const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
   const hist = p.hist.map(h => h.ovr);
   let h = `<div class="card-lg" style="margin-bottom:14px">${cardHTML(p, { destaque: p.id === mvpId() })}</div>`;
-  h += `<p class="sub" style="text-align:center">${(POS[p.pos] || POS.cor).name}. Técnica ${fmtN(tecnica(p))}, forma ${fmtN(p.forma)}.</p>`;
+  h += `<p class="sub" style="text-align:center">${esc(posLabel(p))}. Técnica ${fmtN(tecnica(p))}, forma ${fmtN(p.forma)}.</p>`;
+  if (p.calib || p.level) h += `<p class="sub small" style="text-align:center">${p.level ? `Entrou como ${LEVELS[p.level].name.toLowerCase()}. ` : ''}${p.calib ? `Em calibração: ${CALIB.length - p.n === 1 ? 'falta 1 jogo' : `faltam ${CALIB.length - p.n} jogos`} para a carta firmar, e até lá ela anda mais rápido.` : ''}</p>`;
   if (hist.length >= 2) h += section('Evolução', `<div class="list" style="padding:10px 12px">${spark(hist)}<div class="row sub small"><span>${hist[0]}</span><span class="spacer"></span><span>${plural(hist.length - 1, 'jogo', 'jogos')}</span><span class="spacer"></span><span>${hist[hist.length - 1]}</span></div></div>`);
   h += section('Na temporada', `<div class="stats">${stat(t.jogos, 'Jogos')}${stat(t.sets ? Math.round(100 * t.setsV / t.sets) + '%' : '–', 'Sets ganhos')}${stat(t.notaN ? fmtN(t.notaSum / t.notaN) : '–', 'Nota média')}${stat(t.mvp, 'MVPs')}${stat(t.ace, 'Aces')}${stat(t.es, 'Erros de saque')}${stat(t.ep, 'Erros de passe')}${stat(t.ap, 'Pontos de ataque')}${stat(t.bl, 'Bloqueios')}${stat(t.df, 'Defesas')}${stat(t.ea, 'Erros de ataque')}${stat(t.el, 'Erros de toque')}</div>`);
   if (S.canWrite) h += `<div style="margin-top:16px"><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(p.id)}">Editar jogador</button></div>`;
@@ -1460,13 +1621,13 @@ function spark(v) {
 function previewHTML(gid) {
   const g = S.games[gid];
   if (!g) return '';
-  const res = computeResult(g, S.players);
+  const res = resultOf(g) || { players: {}, awards: [], mvp: null };
   const bad = g.sets.map((st, i) => (st.pa == null || st.pb == null || st.pa === st.pb || st.a === st.b) ? i + 1 : 0).filter(Boolean);
   const warn = bad.length ? `<div class="banner" style="margin:0 0 10px;border:1px solid var(--zone);background:transparent">${bad.length === 1 ? `O set ${bad[0]} está incompleto ou empatado e não vai contar.` : `Os sets ${bad.join(', ')} estão incompletos ou empatados e não vão contar.`}</div>` : '';
-  return `${warn}<p class="sub">Confira antes de gravar. Nada muda nas cartas até você tocar em atualizar.</p>
+  return `${warn}<p class="sub">As cartas já estão com esse placar. Encerrar só trava o jogo, e dá para reabrir se precisar corrigir.</p>
     <div class="total" style="text-align:left;margin:4px 0 8px">${esc(scoreline(g) || '')}</div>
     ${reportBody(res.players, res.mvp, res.awards, 'preview')}
-    <div style="display:grid;gap:10px;margin-top:16px"><button class="btn btn-block btn-ball" data-act="commit">Atualizar cartas e finalizar</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Voltar para o jogo</button></div>`;
+    <div style="display:grid;gap:10px;margin-top:16px"><button class="btn btn-block btn-ball" data-act="closeGame">Encerrar jogo</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Voltar para o jogo</button></div>`;
 }
 
 // ---------- Lista do WhatsApp ----------
@@ -1508,7 +1669,7 @@ function needsBackup() {
 }
 function markBackup() { try { localStorage.setItem(LS_BACKUP, todayStr()); } catch (e) { } }
 async function exportBackup() {
-  const data = JSON.stringify({ app: 'manchete', v: 1, at: new Date().toISOString(), players: S.players, games: S.games });
+  const data = JSON.stringify({ app: 'manchete', v: 2, at: new Date().toISOString(), players: S.players, games: S.games });
   const name = `manchete-backup-${todayStr()}.json`;
   try {
     const file = new File([data], name, { type: 'application/json' });
@@ -1546,6 +1707,7 @@ function readBackup(file) {
         const oldP = Object.keys(S.players), oldG = Object.keys(S.games);
         S.players = players; S.games = games;
         S.ui.gameId = null;
+        dirty(); upgradeData();
         for (const id of new Set(oldP.concat(Object.keys(players)))) persist('players', id);
         for (const id of new Set(oldG.concat(Object.keys(games)))) persist('games', id);
         closeSheet(); render(); toast('Backup restaurado.');
@@ -1569,11 +1731,11 @@ function inviteText(g) {
 }
 function teamsText(g) {
   let t = `🏐 Times de ${fmtDay(g.date).toLowerCase()}, ${fmtTime(g.time)}\n`;
-  g.teams.forEach((tm, i) => { t += `\n${TEAMS[i].name} (média ${fmtN(teamAvg(tm))}):\n` + tm.filter(P).map(id => `- ${nameOf(id)}`).join('\n') + '\n'; });
+  g.teams.forEach((tm, i) => { t += `\n${TEAMS[i].name} (média ${fmtN(teamAvg(tm, g))}):\n` + tm.filter(P).map(id => `- ${nameOf(id)}`).join('\n') + '\n'; });
   return t.trim();
 }
 function resultText(g) {
-  const res = g.res || {};
+  const res = resultOf(g) || {};
   let t = `🏐 Resultado de ${fmtDay(g.date).toLowerCase()}: ${scoreline(g) || ''}\n`;
   if (res.mvp) t += `MVP: ${nameOf(res.mvp)}\n`;
   for (const a of (res.awards || [])) if (a.key !== 'mvp') t += `${a.name}: ${nameOf(a.pid)}\n`;
@@ -1665,7 +1827,7 @@ const ACT = {
       closeSheet(); S.ui.gameId = g.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0); toast('Jogo marcado.');
     }
   },
-  askDeleteGame: el => openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda. Se ele já foi finalizado, as cartas continuam como estão.', ok: 'Apagar jogo', danger: true, run: () => { delete S.games[el.dataset.id]; persist('games', el.dataset.id); S.ui.gameId = null; closeSheet(); render(); toast('Jogo apagado.'); } }),
+  askDeleteGame: el => openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda e, se tinha placar, as cartas voltam a ficar como se ele não tivesse acontecido.', ok: 'Apagar jogo', danger: true, run: () => { delete S.games[el.dataset.id]; persist('games', el.dataset.id); S.ui.gameId = null; closeSheet(); render(); toast('Jogo apagado.'); } }),
   confirmOk: () => { const s = S.ui.sheet; if (s && s.run) s.run(); },
   togglePres: el => {
     const g = curGame(), id = el.dataset.pid;
@@ -1710,7 +1872,7 @@ const ACT = {
     if (g.sets.length) return toast('Já tem set no placar. Apague os sets para sortear de novo.');
     const ids = playingIds(g), T = g.nTeams;
     if (ids.length < T * 2) return toast(`Precisa de pelo menos ${T * 2} confirmados para ${T} times.`);
-    const r = balanceTeams(ids.map(id => ({ id, ovr: ovrOf(P(id)), pos: P(id).pos })), T);
+    const r = balanceTeams(ids.map(id => ({ id, ovr: ovrOf(P(id)), pos: P(id).pos, pos2: P(id).pos2 })), T);
     if (!r) return toast('Não consegui sortear.');
     g.teams = r.teams; S.ui.swapSel = null; S.ui.selP = null;
     persist('games', g.id); render();
@@ -1767,108 +1929,96 @@ const ACT = {
   delSet: el => { const g = curGame(); if (!g) return; g.sets.splice(Number(el.dataset.i), 1); persist('games', g.id); render(); },
   preview: () => {
     const g = curGame(); if (!g) return;
-    if (!g.teams) return toast('Monte os times antes de finalizar.');
-    const valid = g.sets.filter(s => s.pa != null && s.pb != null && s.pa !== s.pb && s.a !== s.b);
-    if (!valid.length) return toast('Anote o placar de pelo menos um set, sem empate.');
+    if (!g.teams) return toast('Monte os times antes de encerrar.');
+    if (!hasResult(g)) return toast('Anote o placar de pelo menos um set, sem empate.');
     S.ui.openRep = null; openSheet({ type: 'preview', gameId: g.id });
   },
   repToggle: el => { const id = el.dataset.pid; S.ui.openRep = S.ui.openRep === id ? null : id; if (el.dataset.ctx === 'preview') renderSheet(); else render(); },
-  commit: () => {
+  closeGame: () => {
     const g = S.games[S.ui.sheet && S.ui.sheet.gameId];
-    if (!g || g.status === 'finalizado') return closeSheet();
-    const res = computeResult(g, S.players);
-    const before = {}, rows = {};
-    for (const [pid, r] of Object.entries(res.players)) {
-      const p = P(pid); if (!p) continue;
-      before[pid] = clone({ at: p.at, forma: p.forma, tot: p.tot, hist: p.hist, last: p.last });
-      p.at = r.atAfter; p.forma = r.formaAfter;
-      const t = p.tot;
-      t.jogos += 1; t.sets += r.sets; t.setsV += r.won;
-      for (const k of EVENT_KEYS) t[k] += (r.counts[k] || 0);
-      if (r.nota != null) { t.notaSum = Math.round((t.notaSum + r.nota) * 10) / 10; t.notaN += 1; }
-      if (res.mvp === pid) t.mvp += 1;
-      if (!p.hist.length) p.hist.push({ g: null, d: g.date, ovr: r.ovrBefore, nota: null });
-      p.hist = p.hist.concat([{ g: g.id, d: g.date, ovr: r.ovrAfter, nota: r.nota }]).slice(-50);
-      p.last = { g: g.id, d: r.ovrAfter - r.ovrBefore };
-      p.updated = Date.now();
-      rows[pid] = r;
-      persist('players', pid);
-    }
-    g.status = 'finalizado'; g.finishedAt = Date.now();
-    g.res = clone({ rows, mvp: res.mvp, awards: res.awards, before });
+    if (!g) return closeSheet();
+    g.status = 'encerrado'; g.finishedAt = Date.now();
     persist('games', g.id);
+    const res = resultOf(g);
     closeSheet(); S.ui.openRep = null; render(); window.scrollTo(0, 0);
-    toast(res.mvp ? `Cartas atualizadas. MVP: ${nameOf(res.mvp)}.` : 'Cartas atualizadas.');
+    toast(res && res.mvp && P(res.mvp) ? `Jogo encerrado. MVP: ${nameOf(res.mvp)}.` : 'Jogo encerrado.');
   },
-  askUndoFinal: () => {
-    const g = curGame(); if (!g || !g.res) return;
-    const before = g.res.before || {};
-    const blocked = Object.keys(before).filter(pid => P(pid) && (!P(pid).last || P(pid).last.g !== g.id));
-    if (blocked.length) return toast(`Não dá: ${nameOf(blocked[0])} já jogou um jogo finalizado depois deste. Desfaça o mais recente primeiro.`);
-    const gid = g.id;
-    openSheet({ type: 'confirm', title: 'Desfazer finalização?', text: 'As cartas voltam para como estavam antes deste jogo. A súmula e o placar continuam salvos para você corrigir.', ok: 'Desfazer finalização', danger: true, run: () => {
-      const g = S.games[gid];
-      if (!g || !g.res) return closeSheet();
-      const before = g.res.before || {};
-      for (const [pid, b] of Object.entries(before)) {
-        const p = P(pid); if (!p) continue;
-        const c = cleanPlayer(pid, { ...p, ...b });
-        Object.assign(p, { at: c.at, forma: c.forma, tot: c.tot, hist: c.hist, last: c.last, updated: Date.now() });
-        persist('players', pid);
-      }
-      g.status = 'agendado'; g.res = null; g.finishedAt = 0;
-      persist('games', g.id); S.ui.step = 'placar'; closeSheet(); render(); toast('Finalização desfeita.');
-    } });
+  reopen: () => {
+    const g = curGame(); if (!g) return;
+    g.status = 'agendado'; g.finishedAt = 0;
+    persist('games', g.id); S.ui.step = 'placar'; render(); window.scrollTo(0, 0);
+    toast('Jogo reaberto. As cartas acompanham o que você corrigir.');
   },
   nextWeek: () => {
     const g = curGame(); if (!g) return;
     let date = addDays(g.date, 7);
     while (date < todayStr()) date = addDays(date, 7);
-    const exists = Object.values(S.games).find(x => x.date === date && x.time === g.time && x.status !== 'finalizado');
+    const exists = Object.values(S.games).find(x => x.date === date && x.time === g.time && x.status !== 'encerrado');
     if (exists) { S.ui.gameId = exists.id; S.ui.step = null; render(); return toast('Esse jogo já estava marcado.'); }
     const n = cleanGame(uid('g'), { date, time: g.time, place: g.place, max: g.max, note: g.note, track: g.track, nTeams: g.nTeams, created: Date.now() });
     S.games[n.id] = n; persist('games', n.id);
     S.ui.gameId = n.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0); toast(`Marcado para ${fmtDay(date).toLowerCase()}.`);
   },
   newPlayer: el => {
-    S.ui.form = { pid: null, pos: 'cor', at: { saq: 66, rec: 66, lev: 66, ata: 66, blo: 66, def: 66 }, photo: '', forGame: el && el.dataset.forgame ? S.ui.gameId : null };
+    S.ui.form = { pid: null, pos: 'cor', pos2: [], level: 'exp', at: presetAt('exp', 'cor'), preset: true, photo: '', forGame: el && el.dataset.forgame ? S.ui.gameId : null };
     openSheet({ type: 'playerForm' });
   },
   openPlayer: el => openSheet({ type: 'player', pid: el.dataset.pid }),
-  editPlayer: el => { const p = P(el.dataset.pid); if (!p) return; S.ui.form = { pid: p.id, pos: p.pos, at: { ...p.at }, photo: p.photo }; openSheet({ type: 'playerForm' }); },
+  editPlayer: el => { const p = P(el.dataset.pid); if (!p) return; S.ui.form = { pid: p.id, pos: p.pos, pos2: (p.pos2 || []).slice(), level: p.level, at: { ...p.at }, start: { ...p.at }, photo: p.photo }; openSheet({ type: 'playerForm' }); },
   nudge: el => {
     const held = HOLD && HOLD.b === el && HOLD.fired;
     HOLD = null;
     if (!held) nudge(el.dataset.attr, Number(el.dataset.nudge));
   },
-  formPos: el => { if (!S.ui.form) return; S.ui.form.pos = el.dataset.pos; document.querySelectorAll('[data-act="formPos"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.pos === S.ui.form.pos))); updateFormPreview(); },
+  formPos: el => {
+    const f = S.ui.form; if (!f) return;
+    f.pos = el.dataset.pos;
+    f.pos2 = f.pos2.filter(x => x !== f.pos);
+    if (!f.pid && f.preset) f.at = presetAt(f.level, f.pos);
+    keepFormInputs(() => renderSheet());
+  },
+  formPos2: el => {
+    const f = S.ui.form, k = el.dataset.pos; if (!f || k === f.pos) return;
+    if (f.pos2.includes(k)) f.pos2 = f.pos2.filter(x => x !== k);
+    else if (f.pos2.length >= 2) return toast('Escolha no máximo duas posições extras.');
+    else f.pos2 = f.pos2.concat(k);
+    document.querySelectorAll('[data-act="formPos2"]').forEach(b => b.setAttribute('aria-pressed', String(f.pos2.includes(b.dataset.pos))));
+  },
+  formLevel: el => {
+    const f = S.ui.form; if (!f || f.pid) return;
+    f.level = el.dataset.level; f.at = presetAt(f.level, f.pos); f.preset = true;
+    keepFormInputs(() => renderSheet());
+  },
   pickPhoto: () => { const i = $('#photoInput'); i.value = ''; i.click(); },
   removePhoto: () => { if (!S.ui.form) return; S.ui.form.photo = ''; keepFormInputs(() => renderSheet()); },
   savePlayer: () => {
     const f = S.ui.form; if (!f) return;
     const name = $('#pName').value.trim().slice(0, 60), nick = $('#pNick').value.trim().slice(0, 16);
     if (!name) { $('#pErr').textContent = 'Escreva o nome do jogador.'; $('#pName').focus(); return; }
-    if (f.pid && P(f.pid)) {
-      const p = P(f.pid);
-      Object.assign(p, { name, nick, pos: f.pos, at: { ...f.at }, photo: f.photo, updated: Date.now() });
-      persist('players', p.id); closeSheet(); render(); toast('Jogador salvo.');
+    const bad = document.querySelector('.rng-num.bad');
+    if (bad) { $('#pErr').textContent = 'Tem nota fora da faixa permitida. Corrija o número em vermelho.'; bad.focus(); return; }
+    if (f.pid && RAW(f.pid)) {
+      const raw = RAW(f.pid);
+      Object.assign(raw, { name, nick, pos: f.pos, pos2: f.pos2.slice(), photo: f.photo, updated: Date.now() });
+      const changed = {};
+      for (const a of ATTRS) if (Math.abs(f.at[a] - f.start[a]) > 1e-9) changed[a] = clamp(Math.round(f.at[a]), 40, 99);
+      if (Object.keys(changed).length) raw.adj = (raw.adj || []).concat([{ t: adjTime(), at: changed }]);
+      persist('players', raw.id); closeSheet(); render(); toast('Jogador salvo.');
       return;
     }
     const at = {}; for (const a of ATTRS) at[a] = clamp(Math.round(f.at[a]), 40, 90);
-    const p = cleanPlayer(uid('p'), { name, nick, pos: f.pos, at, photo: f.photo, created: Date.now(), updated: Date.now() });
-    p.forma = Math.round(tecnica(p) * 10) / 10;
-    p.hist = [{ g: null, d: todayStr(), ovr: ovrOf(p), nota: null }];
+    const p = cleanPlayer(uid('p'), { name, nick, pos: f.pos, pos2: f.pos2, level: f.level, photo: f.photo, base: { at }, adj: [], created: Date.now(), updated: Date.now() });
     S.players[p.id] = p; persist('players', p.id);
     const gid = f.forGame;
-    if (gid && S.games[gid] && S.games[gid].status !== 'finalizado') { S.games[gid].conf.push(p.id); persist('games', gid); }
-    closeSheet(); render(); toast(`Carta de ${p.nick || p.name} criada: ${ovrOf(p)}.`);
+    if (gid && S.games[gid] && S.games[gid].status !== 'encerrado') { S.games[gid].conf.push(p.id); persist('games', gid); }
+    closeSheet(); render(); toast(`Carta de ${p.nick || p.name} criada: ${ovrOf(P(p.id))}.`);
   },
   askDeletePlayer: el => {
     const id = el.dataset.pid;
-    openSheet({ type: 'confirm', title: 'Apagar jogador?', text: `${nameOf(id)} sai do elenco e das listas de presença dos próximos jogos. Os jogos já finalizados continuam registrados.`, ok: 'Apagar jogador', danger: true, run: () => {
+    openSheet({ type: 'confirm', title: 'Apagar jogador?', text: `${nameOf(id)} sai do elenco e das listas de presença dos próximos jogos. Os jogos com placar continuam valendo para os outros.`, ok: 'Apagar jogador', danger: true, run: () => {
       delete S.players[id]; persist('players', id);
       for (const g of Object.values(S.games)) {
-        if (g.status === 'finalizado') continue;
+        if (g.status === 'encerrado') continue;
         if (g.conf.includes(id) || g.paid.includes(id)) { g.conf = g.conf.filter(x => x !== id); g.paid = g.paid.filter(x => x !== id); persist('games', g.id); }
       }
       closeSheet(); render(); toast('Jogador apagado.');
@@ -1896,8 +2046,22 @@ const CHG = {
     persist('games', g.id); render();
   }
 };
+function numCheck(el, leaving) {
+  const a = el.dataset.attr, max = Number(el.dataset.max);
+  const raw = el.value.replace(/\D/g, '').slice(0, 2);
+  if (raw !== el.value) el.value = raw;
+  const v = raw === '' ? NaN : Number(raw);
+  let msg = '';
+  if (!Number.isNaN(v) && v > max) msg = max === 90 ? 'No cadastro o máximo é 90. Acima disso, só jogando.' : 'O máximo é 99.';
+  else if ((raw.length === 2 || (leaving && raw !== '')) && v < 40) msg = 'O mínimo é 40.';
+  el.classList.toggle('bad', !!msg);
+  const er = $('#e_' + a); if (er) er.textContent = msg;
+  if (!msg && raw.length === 2 && v !== formValue(a)) rngCommit($('#r_' + a), v);
+  if (leaving && raw === '') { el.value = formValue(a); el.classList.remove('bad'); if (er) er.textContent = ''; }
+}
 const INP = {
-  pname: () => updateFormPreview()
+  pname: () => updateFormPreview(),
+  num: el => numCheck(el, false)
 };
 document.addEventListener('click', e => {
   if (e.target && e.target.dataset && e.target.dataset.sheetbg) return closeSheet();
@@ -1910,7 +2074,22 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => { const el = e.target.closest && e.target.closest('[data-change]'); if (el && CHG[el.dataset.change]) CHG[el.dataset.change](el, e); });
 document.addEventListener('input', e => { const el = e.target.closest && e.target.closest('[data-input]'); if (el && INP[el.dataset.input]) INP[el.dataset.input](el, e); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.ui.sheet) closeSheet(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.ui.sheet) closeSheet();
+  if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('rng-num')) { e.preventDefault(); e.target.blur(); }
+});
+// Ao tocar no número, o campo esvazia e mostra o valor atual de fundo: é só digitar o novo.
+document.addEventListener('focusin', e => {
+  const t = e.target;
+  if (!t.classList || !t.classList.contains('rng-num')) return;
+  t.placeholder = t.value; t.value = '';
+});
+document.addEventListener('focusout', e => {
+  const t = e.target;
+  if (!t.classList || !t.classList.contains('rng-num')) return;
+  numCheck(t, true);
+  t.placeholder = '';
+});
 $('#photoInput').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) processPhoto(f); });
 $('#backupInput').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) readBackup(f); });
 

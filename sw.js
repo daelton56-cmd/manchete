@@ -1,6 +1,6 @@
 // Manchete: deixa o app abrir mesmo sem internet no ginásio.
 // A página sempre tenta a versão nova primeiro; sem rede, usa a última salva.
-const CACHE = 'manchete-v1';
+const CACHE = 'manchete-v2';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
