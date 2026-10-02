@@ -251,6 +251,11 @@ td .num{font-size:18px}
 .trend{font-size:11px; font-size:7.5cqw; font-weight:600; margin-top:3px}
 .card-photo{width:52%; aspect-ratio:1; border-radius:50%; overflow:hidden; display:grid; place-items:center; background:var(--c-frame); border:2px solid var(--c-sub); margin-top:4%}
 .card-photo img{width:100%; height:100%; object-fit:cover}
+.card-zoom{padding:0; cursor:zoom-in}
+.zoom-bg{position:fixed; inset:0; z-index:80; background:rgba(4,12,26,.94); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:calc(env(safe-area-inset-top,0px) + 56px) 16px calc(env(safe-area-inset-bottom,0px) + 24px)}
+.zoom-bg img{max-width:100%; max-height:72vh; border-radius:18px; object-fit:contain; box-shadow:0 0 0 3px var(--ball)}
+.zoom-cap{color:#F3F6FB; font-family:var(--display); font-weight:800; font-size:30px; margin-top:14px}
+.zoom-close{position:absolute; top:calc(env(safe-area-inset-top,0px) + 12px); right:16px; color:#F3F6FB; border-color:rgba(255,255,255,.3)}
 .card-photo span{font-family:var(--display); font-weight:800; font-size:24px; font-size:17cqw}
 .card-name{font-weight:600; font-size:15px; font-size:10.5cqw; text-align:center; padding:4% 0 3%; border-bottom:1px solid var(--c-frame); margin-bottom:5%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .card-attrs{display:grid; grid-template-columns:1fr 1fr; column-gap:10%}
@@ -359,6 +364,7 @@ html::after{content:""; position:fixed; left:0; right:0; top:0; height:env(safe-
 <main class="wrap" id="view" aria-live="polite"></main>
 <nav class="tabs" aria-label="Seções"><div class="tabs-in" id="tabs"></div></nav>
 <div id="sheet"></div>
+<div id="zoom"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="photoInput" accept="image/*" class="sr" tabindex="-1" aria-hidden="true">
 <input type="file" id="backupInput" accept="application/json,.json" class="sr" tabindex="-1" aria-hidden="true">
@@ -594,6 +600,15 @@ function costOf(teams, info) {
       if (able.reduce((a, b) => a + b, 0) >= teams.length) cost += able.filter(v => v === 0).length * 3;
     }
   }
+  // Altura e idade (opcionais): servem de desempate para os times não ficarem todos altos de um lado.
+  const meanOf = (t, f) => { const v = t.map(id => info[id][f]).filter(x => typeof x === 'number'); return v.length * 2 >= t.length && v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const hs = teams.map(t => meanOf(t, 'h'));
+  if (hs.every(x => x != null)) cost += 0.1 * (Math.max(...hs) - Math.min(...hs));
+  const tall = teams.map(t => t.filter(id => (info[id].h || 0) >= 185).length);
+  const tallSpread = Math.max(...tall) - Math.min(...tall);
+  if (tallSpread > 1) cost += (tallSpread - 1) * 1;
+  const ages = teams.map(t => meanOf(t, 'age'));
+  if (ages.every(x => x != null)) cost += 0.05 * (Math.max(...ages) - Math.min(...ages));
   return cost;
 }
 function* combos(arr, k, start = 0, acc = []) {
@@ -805,6 +820,8 @@ function cleanPlayer(id, d) {
     guest: d.guest === true,
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : null,
     locked: d.locked === true,
+    height: typeof d.height === 'number' && d.height >= 120 && d.height <= 230 ? Math.round(d.height) : null,
+    birthYear: typeof d.birthYear === 'number' && d.birthYear >= 1930 && d.birthYear <= new Date().getFullYear() - 6 ? Math.round(d.birthYear) : null,
     photo: (typeof d.photo === 'string' && d.photo.length < 200000 && PHOTO_RE.test(d.photo)) ? d.photo : '',
     created: numOr(d.created, 0), updated: numOr(d.updated, 0),
     base: d.base && typeof d.base === 'object' && d.base.at ? { at: cleanAt(d.base.at), forma: typeof d.base.forma === 'number' ? clamp(d.base.forma, 40, 99) : null } : null,
@@ -839,6 +856,8 @@ function cleanGame(id, d) {
     log: Array.isArray(d.log) ? d.log.filter(e => e && typeof e.p === 'string' && EVENTS[e.e]).slice(-3000).map(e => ({ p: e.p, e: e.e, t: numOr(e.t, 0) })) : [],
     created: numOr(d.created, 0), finishedAt: numOr(d.finishedAt, 0),
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : null,
+    vis: d.vis === 'privada' ? 'privada' : 'turma',
+    allowed: ids(d.allowed),
     resultRev: Math.max(0, Math.round(numOr(d.resultRev, 0))),
     confirms: (() => { const o = {}; if (d.confirms && typeof d.confirms === 'object') for (const [k, v] of Object.entries(d.confirms)) if (typeof v === 'number') o[k] = v; return o; })()
   };
@@ -918,13 +937,14 @@ function upgradeData() {
 }
 
 // ---------- Gravação ----------
-function persist(kind, id, delay = 0) {
+function persist(kind, id, delay = 0, then) {
   dirty();
   if (!S.canWrite) return;
-  if (S.mode === 'local') return saveLocalSoon();
+  if (S.mode === 'local') { saveLocalSoon(); if (then) then(); return; }
   if (S.mode !== 'cloud') return;
   const key = kind + '/' + id;
   const st = PEND[key] || (PEND[key] = { timer: null, saving: false, dirty: false, tries: 0 });
+  if (then) (st.after = st.after || []).push(then);
   st.dirty = true;
   clearTimeout(st.timer);
   st.timer = setTimeout(() => flush(key), delay);
@@ -939,6 +959,8 @@ async function flush(key) {
     const ref = S.db.doc(key);
     if (obj) await ref.set(clone(obj)); else await ref.delete();
     st.tries = 0;
+    const cbs = st.after || []; st.after = [];
+    for (const f of cbs) { try { f(); } catch (er) { } }
   } catch (e) {
     const code = e && e.code;
     if (code === 'unavailable' && st.tries < 2) { st.tries++; st.dirty = true; st.saving = false; st.timer = setTimeout(() => flush(key), 600 + Math.random() * 900); return; }
@@ -1006,7 +1028,7 @@ function subscribe() {
       if (!snap.metadata.fromCache) firm[kind] = true;
       if (got.players && got.games && S.mode === 'loading-cloud') {
         S.mode = 'cloud';
-        if (S.openGameId && S.games[S.openGameId]) { S.ui.gameId = S.openGameId; S.ui.step = null; }
+        if (S.openGameId && S.games[S.openGameId]) { if (gameVisible(S.games[S.openGameId])) { S.ui.gameId = S.openGameId; S.ui.step = null; } else setTimeout(() => toast('Essa partida é privada. Peça para quem marcou te convidar.'), 300); }
         S.openGameId = null;
         if (FB() && !S.players[meId()]) setTimeout(() => { if (FB() && !S.players[meId()] && !S.ui.sheet) ACT.newSelf(); }, 60);
       }
@@ -1136,6 +1158,10 @@ function lostTurma() {
   S.mode = 'no-turma'; S.authMsg = 'Você não está mais nessa turma.'; render(); loadMyTurmas();
 }
 function resync() { if (!FB()) return; const t = S.turmaId; stopListening(); S.unsubs = []; openTurma(t); }
+const ageOf = p => (p && p.birthYear ? new Date().getFullYear() - p.birthYear : null);
+function gameVisible(g) { if (!FBM() || !g) return true; return g.vis !== 'privada' || g.createdBy === meId() || g.allowed.includes(meId()) || isTurmaAdmin(); }
+function canJoinGame(g) { return !FBM() || g.vis !== 'privada' || g.createdBy === meId() || g.allowed.includes(meId()); }
+const invitedTo = (g, p) => !FBM() || g.vis !== 'privada' || p.guest || p.id === g.createdBy || g.allowed.includes(p.id);
 function canCreate() { return S.canWrite && (!FBM() || (FB() && !!S.players[meId()])); }
 function isTurmaAdmin() { if (!FBM()) return S.canWrite; return !!(S.turma && (S.turma.admins || []).includes(meId())); }
 function canEditGame(g) { if (!S.canWrite) return false; if (!FBM()) return true; return !!g && (g.createdBy === meId() || isTurmaAdmin()); }
@@ -1196,6 +1222,7 @@ function scoreline(g) {
   if (T === 2) return `${TEAMS[0].name} ${wins[0]} x ${wins[1]} ${TEAMS[1].name}`;
   return wins.map((w, i) => `${TEAMS[i].name} ${w}`).join(', ');
 }
+function teamHeight(t) { const v = t.filter(P).map(id => P(id).height).filter(Boolean); return v.length && v.length * 2 >= t.length ? `${fmtN(v.reduce((a, b) => a + b, 0) / v.length / 100, 2)} m, ` : ''; }
 function ovrIn(g, id) { const r = resultOf(g); const row = r && r.players[id]; return row ? row.ovrBefore : ovrOf(P(id)); }
 function teamAvg(ids, g) { const v = ids.filter(P).map(id => g ? ovrIn(g, id) : ovrOf(P(id))); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; }
 
@@ -1207,9 +1234,10 @@ function cardHTML(p, opt = {}) {
   const pos = POS[p.pos] || POS.cor;
   const tr = p.last && p.last.d ? `<span class="trend">${p.last.d > 0 ? '▲' : '▼'}${Math.abs(p.last.d)}</span>` : '';
   const ph = p.photo ? `<img src="${p.photo}" alt="">` : `<span>${esc(initials(p))}</span>`;
+  const photoBox = opt.zoom && p.photo ? `<button class="card-photo card-zoom" data-act="zoomPhoto" data-pid="${esc(p.id)}" aria-label="Ver a foto de ${esc(p.nick || p.name)}">${ph}</button>` : `<div class="card-photo">${ph}</div>`;
   const at = a => `<div data-a="${a}"><b>${Math.round(p.at[a])}</b><span>${ATTR[a].abbr}</span></div>`;
   return `<div class="card t-${tier.key} ${opt.size ? 'card-' + opt.size : ''}">
-    <div class="card-top"><div class="card-ovr"><b>${ovr}</b><small>${pos.abbr}</small>${tr}</div><div class="card-photo">${ph}</div></div>
+    <div class="card-top"><div class="card-ovr"><b>${ovr}</b><small>${pos.abbr}</small>${tr}</div>${photoBox}</div>
     <div class="card-name">${esc(p.nick || p.name)}</div>
     <div class="card-attrs">${at('saq')}${at('ata')}${at('rec')}${at('blo')}${at('lev')}${at('def')}</div>
     <div class="card-tier">${tier.name}</div>
@@ -1224,7 +1252,7 @@ function gameRow(g) {
   const mvp = res && res.mvp && P(res.mvp) ? nameOf(res.mvp) : null;
   const past = g.date < todayStr();
   const pill = canConfirm(g) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Confirme o placar</span>' : pendingConfirm(g) ? '<span class="pill">Falta confirmar</span>' : g.status === 'encerrado' ? '<span class="pill pill-done">Encerrado</span>' : res ? '<span class="pill">Placar lançado</span>' : (past ? '<span class="pill">Sem placar</span>' : `<span class="pill">${plural(g.conf.filter(P).length, 'confirmado', 'confirmados')}</span>`);
-  const sub = sl ? esc(sl) + (mvp ? `<br>MVP: ${esc(mvp)}` : '') : esc(g.place || 'Local a definir');
+  const sub = (g.vis === 'privada' && FBM() ? 'Privada. ' : '') + (sl ? esc(sl) + (mvp ? `<br>MVP: ${esc(mvp)}` : '') : esc(g.place || 'Local a definir'));
   return `<button class="item" data-act="openGame" data-id="${esc(g.id)}">
     <div class="date-box"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></div>
     <div class="item-main"><div class="item-title">${DIAS[d.getDay()]}, ${fmtTime(g.time)}</div><div class="item-sub">${sub}</div></div>
@@ -1318,7 +1346,7 @@ function noTurmaView() {
 }
 function agendaView() {
   const t = todayStr();
-  const all = Object.values(S.games);
+  const all = Object.values(S.games).filter(gameVisible);
   const up = all.filter(g => g.status !== 'encerrado' && g.date >= t).sort(byDate);
   const past = all.filter(g => !(g.status !== 'encerrado' && g.date >= t)).sort((a, b) => byDate(b, a));
   let h = banners();
@@ -1333,7 +1361,7 @@ function agendaView() {
 function heroHTML(g) {
   const d = parseDate(g.date), t = todayStr();
   const conf = g.conf.filter(P);
-  const label = g.date === t ? 'Hoje' : g.date === addDays(t, 1) ? 'Amanhã' : 'Próximo jogo';
+  const label = (g.date === t ? 'Hoje' : g.date === addDays(t, 1) ? 'Amanhã' : 'Próximo jogo') + (g.vis === 'privada' && FBM() ? ', partida privada' : '');
   const inList = g.max ? Math.min(conf.length, g.max) : conf.length, waiting = conf.length - inList;
   const confTxt = conf.length ? `${inList}${g.max ? ' de ' + g.max : ''} confirmados${waiting ? `, ${waiting} na espera` : ''}` : 'Ninguém confirmou ainda';
   const myPos = conf.indexOf(meId());
@@ -1345,7 +1373,7 @@ function heroHTML(g) {
     <div class="conf-line">${conf.length ? `<div class="stack">${conf.slice(0, 7).map(id => avatar(P(id))).join('')}</div>` : ''}<span>${confTxt}</span></div>
     ${hasResult(g) ? `<div class="board-place" style="margin:0 0 12px;color:var(--board-ink)"><b>${esc(scoreline(g) || '')}</b>. ${canConfirm(g) ? 'Confere e confirma o placar?' : pendingConfirm(g) ? 'Falta confirmar o placar.' : 'Placar lançado.'}</div>
       <div style="display:grid;grid-template-columns:${canConfirm(g) ? '1fr 1fr' : '1fr'};gap:10px">${canConfirm(g) ? `<button class="btn" data-act="confirmScore" data-id="${esc(g.id)}">Confirmar placar</button>` : ''}<button class="btn ${canConfirm(g) ? 'board-ghost' : ''}" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button></div>`
-    : FB() && S.players[meId()] ? (g.conf.includes(meId())
+    : FB() && S.players[meId()] && canJoinGame(g) ? (g.conf.includes(meId())
       ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><button class="btn board-ghost" data-act="heroPres" data-id="${esc(g.id)}">Desmarcar</button><button class="btn" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button></div><div class="board-place" style="margin:10px 0 0">${myState}</div>`
       : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><button class="btn" data-act="heroPres" data-id="${esc(g.id)}">Vou jogar</button><button class="btn board-ghost" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button></div>`)
       : `<button class="btn btn-block" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button>`}
@@ -1422,7 +1450,7 @@ function presencaStep(g, confN) {
   const W = canEditGame(g);
   const conf = g.conf.filter(P);
   const confSet = new Set(conf);
-  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id) && isActive(p.id)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
+  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id) && isActive(p.id) && invitedTo(g, p)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
   const max = g.max || Infinity;
   const wait = Math.max(0, conf.length - max);
   const paid = g.paid.filter(id => confSet.has(id)).length;
@@ -1435,7 +1463,7 @@ function presencaStep(g, confN) {
     ${W || (FB() && p.id === meId()) ? `<button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Vai' : (p.id === meId() ? 'Vou' : 'Confirmar')}</button>` : ''}
   </div>`;
   if (conf.length) h += listBox(conf.map((id, i) => row(P(id), i, true)));
-  const shownOthers = W ? others : others.filter(p => p.id === meId());
+  const shownOthers = W ? others : others.filter(p => p.id === meId() && canJoinGame(g));
   if (shownOthers.length) h += section(W ? 'Ainda não confirmaram' : 'Você', listBox(shownOthers.map(p => row(p, 0, false))));
   if (W) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="${FB() ? 'newGuest' : 'newPlayer'}" data-forgame="1">${ICON.plus}${FB() ? 'Convidado neste jogo' : 'Novo jogador neste jogo'}</button></div>`;
   if (FB() && !W) h += `<p class="sub small" style="margin-top:10px">Quem marcou o jogo cuida dos times, da súmula e do placar.</p>`;
@@ -1464,7 +1492,7 @@ function timesStep(g) {
   const diff = Math.max(...avgs) - Math.min(...avgs);
   h += `<p class="sub" style="margin:12px 0">Diferença entre as médias: <b class="num" style="font-size:18px;color:var(--ink)">${fmtN(diff)}</b> ${diff < 1.05 && diff > 0.95 ? 'ponto' : 'pontos'}.${W ? (started ? ' Se alguém for embora, toque no nome dele para os próximos sets não contarem.' : ' Toque em dois jogadores de times diferentes para trocar.') : ''}</p>`;
   h += `<div class="teams">${g.teams.map((t, i) => `<div class="team">
-    <div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span><span class="sub small">média</span><span class="team-avg">${fmtN(avgs[i])}</span></div>
+    <div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span><span class="sub small">${teamHeight(t)}média</span><span class="team-avg">${fmtN(avgs[i])}</span></div>
     ${t.filter(P).map(id => {
       const p = P(id), out = g.leave[id] != null, jn = g.join[id];
       const tag = out ? `<span class="tp-tag">saiu depois do set ${g.leave[id]}</span>` : (jn ? `<span class="tp-tag">entrou no set ${jn + 1}</span>` : '');
@@ -1673,9 +1701,18 @@ function gameFormHTML(id) {
   <label class="field"><span>Vagas</span><input class="input" type="number" inputmode="numeric" min="0" max="60" id="fMax" value="${d.max || ''}" placeholder="Sem limite"></label></div>
   <label class="field"><span>Local</span><input class="input" type="text" id="fPlace" maxlength="80" value="${esc(d.place)}" placeholder="Ex.: Ginásio do bairro, quadra 2"></label>
   <label class="field"><span>Observação</span><textarea class="input" id="fNote" maxlength="300" placeholder="Ex.: levar bola, valor da quadra">${esc(d.note)}</textarea></label>
+  ${FB() ? visField(g) : ''}
   <div id="fErr" class="err" role="alert"></div>
   <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-ball" data-act="saveGame" data-id="${esc(id || '')}">${g ? 'Salvar jogo' : 'Marcar jogo'}</button>
   ${g ? `<button class="btn btn-block btn-danger" data-act="askDeleteGame" data-id="${esc(id)}">Apagar jogo</button>` : ''}</div>`;
+}
+function visField(g) {
+  const vis = g ? g.vis : 'turma', allowed = new Set(g ? g.allowed : []);
+  const people = Object.values(S.members).filter(m => m.uid !== meId()).map(m => ({ uid: m.uid, name: (P(m.uid) && (P(m.uid).nick || P(m.uid).name)) || m.name || 'Sem nome' })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  return `<div class="field"><span>Quem vê a partida</span>
+    <div class="seg seg-full" style="grid-template-columns:1fr 1fr" role="group" aria-label="Quem vê a partida"><button data-act="gVis" data-v="turma" aria-pressed="${vis !== 'privada'}">Toda a turma</button><button data-act="gVis" data-v="privada" aria-pressed="${vis === 'privada'}">Só convidados</button></div>
+    <div id="gAllowWrap" ${vis === 'privada' ? '' : 'hidden'} style="margin-top:10px"><p class="sub small" style="margin-bottom:8px">Só quem você marcar vê a partida e confirma presença. ${people.length ? '' : 'Ainda não tem ninguém na turma para convidar.'}</p>
+      <div class="row-wrap">${people.map(m => `<button class="chip" data-act="gAllow" data-uid="${esc(m.uid)}" aria-pressed="${allowed.has(m.uid)}">${esc(m.name)}</button>`).join('')}</div></div></div>`;
 }
 function nextDateLike(last) {
   const t = todayStr();
@@ -1701,7 +1738,7 @@ function perfilHTML() {
   const admin = isTurmaAdmin(), owner = !!(S.turma && S.turma.ownerUid === meId());
   const members = Object.values(S.members).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
   let h = mine
-    ? `<div style="max-width:180px;margin:0 auto 12px">${cardHTML(mine, { destaque: mine.id === mvpId() })}</div><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar minha carta</button>`
+    ? `<div style="max-width:180px;margin:0 auto 12px">${cardHTML(mine, { destaque: mine.id === mvpId(), zoom: true })}</div><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar minha carta</button>`
     : `<div class="empty"><h3>Você ainda não tem carta</h3><p class="sub">Crie a sua para entrar no elenco e confirmar presença.</p><button class="btn btn-ball" data-act="newSelf">Criar minha carta</button></div>`;
   h += `<p class="sub small" style="text-align:center;margin-top:10px">Conectado como ${esc(S.me.name)}, ${esc(S.me.email)}.</p>`;
   h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">${esc(S.turma && S.turma.name ? S.turma.name : 'Turma')}</h2>${admin ? '<button class="btn btn-sm" data-act="renameTurma">Renomear</button>' : ''}</div>`;
@@ -1724,6 +1761,9 @@ function playerFormHTML() {
   <div class="row-wrap" style="justify-content:center;margin-bottom:14px"><button class="btn btn-sm" data-act="pickPhoto">${f.photo ? 'Trocar foto' : 'Escolher foto'}</button>${f.photo ? '<button class="btn btn-sm btn-ghost" data-act="removePhoto">Remover foto</button>' : ''}</div>
   <label class="field"><span>Nome</span><input class="input" id="pName" maxlength="60" value="${esc(p ? p.name : (f.kind === 'self' && S.me ? S.me.name : ''))}" data-input="pname" autocomplete="off"></label>
   <label class="field"><span>Apelido na carta</span><input class="input" id="pNick" maxlength="16" value="${esc(p ? p.nick : '')}" data-input="pname" placeholder="Opcional" autocomplete="off"></label>
+  <div class="grid2"><label class="field"><span>Altura (cm)</span><input class="input" id="pHeight" inputmode="numeric" maxlength="3" value="${p && p.height ? p.height : ''}" placeholder="Opcional" autocomplete="off"></label>
+  <label class="field"><span>Idade</span><input class="input" id="pAge" inputmode="numeric" maxlength="2" value="${ageOf(p) || ''}" placeholder="Opcional" autocomplete="off"></label></div>
+  <p class="sub small" style="margin:-6px 0 14px">Opcionais. Ajudam o sorteio a não juntar os mais altos no mesmo time.</p>
   <div class="field"><span>Posição principal</span><div class="pos-grid" role="group" aria-label="Posição principal">${Object.entries(POS).map(([k, v]) => `<button data-act="formPos" data-pos="${k}" aria-pressed="${f.pos === k}">${v.name}</button>`).join('')}</div></div>
   <div class="field"><span>Também joga de</span><div class="row-wrap" role="group" aria-label="Também joga de">${Object.entries(POS).filter(([k]) => k !== f.pos && k !== 'cor').map(([k, v]) => `<button class="chip" data-act="formPos2" data-pos="${k}" aria-pressed="${f.pos2.includes(k)}">${v.name}</button>`).join('')}</div><p class="sub small" style="margin-top:6px">Opcional, até duas. A carta usa a principal, e as outras ajudam o sorteio a cobrir um time sem levantador, por exemplo.</p></div>
   ${f.pid || f.notes === 'locked' ? '' : `<div class="field"><span>Nível de entrada</span><div class="seg seg-full" role="group" aria-label="Nível de entrada">${Object.entries(LEVELS).map(([k, v]) => `<button data-act="formLevel" data-level="${k}" aria-pressed="${f.level === k}">${v.name}</button>`).join('')}</div><p class="sub small" style="margin-top:6px">${esc(LEVELS[f.level].desc)} As notas abaixo já vêm pela posição, e você ajusta o que quiser.</p></div>`}
@@ -1864,8 +1904,10 @@ function playerHTML(p) {
   const t = p.tot;
   const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
   const hist = p.hist.map(h => h.ovr);
-  let h = `<div class="card-lg" style="margin-bottom:14px">${cardHTML(p, { destaque: p.id === mvpId() })}</div>`;
-  h += `<p class="sub" style="text-align:center">${esc(posLabel(p))}. Técnica ${fmtN(tecnica(p))}, forma ${fmtN(p.forma)}.</p>`;
+  let h = `<div class="card-lg" style="margin-bottom:14px">${cardHTML(p, { destaque: p.id === mvpId(), zoom: true })}</div>`;
+  if (p.photo) h += `<p class="sub small" style="text-align:center;margin-top:-6px">Toque na foto para ver maior.</p>`;
+  const extra = [p.height ? `${fmtN(p.height / 100, 2)} m` : '', ageOf(p) ? `${ageOf(p)} anos` : ''].filter(Boolean).join(', ');
+  h += `<p class="sub" style="text-align:center">${esc(posLabel(p))}${extra ? `, ${extra}` : ''}. Técnica ${fmtN(tecnica(p))}, forma ${fmtN(p.forma)}.</p>`;
   if (FB()) {
     const tag = p.id === meId() ? 'Esta é a sua carta.' : p.guest ? `Convidado, cuidado por ${esc((S.members[p.createdBy] || {}).name || 'alguém da turma')}.` : (!S.members[p.id] ? 'Saiu da turma.' : '');
     if (tag) h += `<p class="sub small" style="text-align:center">${tag}</p>`;
@@ -2072,21 +2114,41 @@ function processPhoto(file) {
     const ctx = c.getContext('2d');
     const s = Math.min(img.width, img.height);
     ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
-    URL.revokeObjectURL(url);
     let data = c.toDataURL('image/jpeg', 0.78);
     if (data.length > 150000) data = c.toDataURL('image/jpeg', 0.55);
+    let big = '';
+    if (FBM()) {
+      const make = max => {
+        const k = Math.min(1, max / Math.max(img.width, img.height));
+        const cb = document.createElement('canvas'); cb.width = Math.round(img.width * k); cb.height = Math.round(img.height * k);
+        cb.getContext('2d').drawImage(img, 0, 0, cb.width, cb.height);
+        return cb;
+      };
+      let cb = make(1080); big = cb.toDataURL('image/jpeg', 0.8);
+      if (big.length > 480000) big = cb.toDataURL('image/jpeg', 0.65);
+      if (big.length > 800000) { cb = make(800); big = cb.toDataURL('image/jpeg', 0.7); }
+      if (big.length > 900000) big = '';
+    }
+    URL.revokeObjectURL(url);
     if (!S.ui.form) return;
-    S.ui.form.photo = data;
+    S.ui.form.photo = data; S.ui.form.photoBig = big;
     keepFormInputs(() => renderSheet());
   };
   img.onerror = () => { URL.revokeObjectURL(url); toast('Não consegui abrir essa imagem.'); };
   img.src = url;
 }
+function savePhotoBig(id, f, hadPhoto) {
+  if (!FB() || !S.db || !S.db.setPhoto) return;
+  if (f.photoBig) S.db.setPhoto(id, f.photoBig).catch(() => toast('A foto em tamanho grande não subiu. Tente trocar de novo.'));
+  else if (!f.photo && hadPhoto) S.db.deletePhoto(id).catch(() => { });
+}
 function keepFormInputs(fn) {
-  const name = ($('#pName') || {}).value, nick = ($('#pNick') || {}).value;
+  const name = ($('#pName') || {}).value, nick = ($('#pNick') || {}).value, hh = ($('#pHeight') || {}).value, ag = ($('#pAge') || {}).value;
   fn();
   if ($('#pName') && name != null) $('#pName').value = name;
   if ($('#pNick') && nick != null) $('#pNick').value = nick;
+  if ($('#pHeight') && hh != null) $('#pHeight').value = hh;
+  if ($('#pAge') && ag != null) $('#pAge').value = ag;
   updateFormPreview();
 }
 
@@ -2096,6 +2158,14 @@ const ACT = {
   home: () => { S.ui.gameId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
   help: () => openSheet({ type: 'help' }),
   closeSheet: () => closeSheet(),
+  zoomPhoto: el => {
+    const p = P(el.dataset.pid); if (!p || !p.photo) return;
+    const z = $('#zoom');
+    z.innerHTML = `<div class="zoom-bg" data-act="zoomClose" role="dialog" aria-modal="true" aria-label="Foto de ${esc(p.nick || p.name)}"><button class="icon-btn zoom-close" data-act="zoomClose" aria-label="Fechar">${ICON.x}</button><img id="zoomImg" src="${p.photo}" alt="Foto de ${esc(p.nick || p.name)}"><div class="zoom-cap">${esc(p.nick || p.name)}</div></div>`;
+    z.dataset.pid = p.id;
+    if (FB() && S.db.getPhoto) S.db.getPhoto(p.id).then(big => { const img = $('#zoomImg'); if (big && img && z.dataset.pid === p.id && PHOTO_RE.test(big)) img.src = big; }).catch(() => { });
+  },
+  zoomClose: () => { const z = $('#zoom'); z.innerHTML = ''; z.dataset.pid = ''; },
   migrate: () => migrate(),
   authTab: el => { S.authTab = el.dataset.tab; S.authMsg = ''; render(); },
   signIn: async el => {
@@ -2202,7 +2272,7 @@ const ACT = {
   reload: () => location.reload(),
   sort: el => { S.ui.sort = el.dataset.sort; render(); },
   rankSort: el => { S.ui.rankSort = el.dataset.sort; render(); },
-  openGame: el => { S.ui.gameId = el.dataset.id; S.ui.step = null; S.ui.selP = null; S.ui.swapSel = null; S.ui.openRep = null; S.ui.flash = ''; render(); window.scrollTo(0, 0); },
+  openGame: el => { if (!gameVisible(S.games[el.dataset.id])) return toast('Essa partida é privada.'); S.ui.gameId = el.dataset.id; S.ui.step = null; S.ui.selP = null; S.ui.swapSel = null; S.ui.openRep = null; S.ui.flash = ''; render(); window.scrollTo(0, 0); },
   step: el => { S.ui.step = el.dataset.step; S.ui.swapSel = null; render(); window.scrollTo(0, 0); },
   newGame: () => openSheet({ type: 'gameForm' }),
   editGame: () => { const g = curGame(); if (g && canEditGame(g)) openSheet({ type: 'gameForm', id: g.id }); },
@@ -2212,18 +2282,26 @@ const ACT = {
     const max = clamp(parseInt($('#fMax').value, 10) || 0, 0, 60);
     const place = $('#fPlace').value.trim().slice(0, 80), note = $('#fNote').value.trim().slice(0, 300);
     const id = el.dataset.id;
+    const visBtn = document.querySelector('[data-act="gVis"][aria-pressed="true"]');
+    const vis = FB() && visBtn ? visBtn.dataset.v : 'turma';
+    const allowed = vis === 'privada' ? [...new Set([meId()].concat([...document.querySelectorAll('[data-act="gAllow"][aria-pressed="true"]')].map(b => b.dataset.uid)))] : [];
     if (id && S.games[id]) {
       if (!canEditGame(S.games[id])) return closeSheet();
-      Object.assign(S.games[id], { date, time, max, place, note });
+      Object.assign(S.games[id], { date, time, max, place, note }, FB() ? { vis, allowed: vis === 'privada' ? [...new Set(allowed.concat(S.games[id].createdBy ? [S.games[id].createdBy] : []))] : [] } : {});
       persist('games', id); closeSheet(); render(); toast('Jogo salvo.');
     } else {
       const last = Object.values(S.games).sort(byDate).pop();
       if (!canCreate()) return closeSheet();
-      const g = cleanGame(uid('g'), { date, time, max, place, note, created: Date.now(), createdBy: meId(), track: last ? last.track : ['saq', 'rec'], nTeams: last ? last.nTeams : 2 });
+      const g = cleanGame(uid('g'), { date, time, max, place, note, vis, allowed, created: Date.now(), createdBy: meId(), track: last ? last.track : ['saq', 'rec'], nTeams: last ? last.nTeams : 2 });
       S.games[g.id] = g; persist('games', g.id);
       closeSheet(); S.ui.gameId = g.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0); toast('Jogo marcado.');
     }
   },
+  gVis: el => {
+    document.querySelectorAll('[data-act="gVis"]').forEach(b => b.setAttribute('aria-pressed', String(b === el)));
+    const wrap = $('#gAllowWrap'); if (wrap) wrap.hidden = el.dataset.v !== 'privada';
+  },
+  gAllow: el => el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')),
   askDeleteGame: el => canEditGame(S.games[el.dataset.id]) && openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda e, se tinha placar, as cartas voltam a ficar como se ele não tivesse acontecido.', ok: 'Apagar jogo', danger: true, run: () => { delete S.games[el.dataset.id]; persist('games', el.dataset.id); S.ui.gameId = null; closeSheet(); render(); toast('Jogo apagado.'); } }),
   confirmOk: () => { const s = S.ui.sheet; if (s && s.run) s.run(); },
   togglePres: el => {
@@ -2280,7 +2358,7 @@ const ACT = {
     if (g.sets.length) return toast('Já tem set no placar. Apague os sets para sortear de novo.');
     const ids = playingIds(g), T = g.nTeams;
     if (ids.length < T * 2) return toast(`Precisa de pelo menos ${T * 2} confirmados para ${T} times.`);
-    const r = balanceTeams(ids.map(id => ({ id, ovr: ovrOf(P(id)), pos: P(id).pos, pos2: P(id).pos2 })), T);
+    const r = balanceTeams(ids.map(id => ({ id, ovr: ovrOf(P(id)), pos: P(id).pos, pos2: P(id).pos2, h: P(id).height || null, age: ageOf(P(id)) })), T);
     if (!r) return toast('Não consegui sortear.');
     bumpRev(g); g.teams = r.teams; S.ui.swapSel = null; S.ui.selP = null;
     persist('games', g.id); render();
@@ -2364,7 +2442,7 @@ const ACT = {
     const exists = Object.values(S.games).find(x => x.date === date && x.time === g.time && x.status !== 'encerrado');
     if (exists) { S.ui.gameId = exists.id; S.ui.step = null; render(); return toast('Esse jogo já estava marcado.'); }
     if (!canCreate()) return;
-    const n = cleanGame(uid('g'), { date, time: g.time, place: g.place, max: g.max, note: g.note, track: g.track, nTeams: g.nTeams, created: Date.now(), createdBy: meId() });
+    const n = cleanGame(uid('g'), { date, time: g.time, place: g.place, max: g.max, note: g.note, track: g.track, nTeams: g.nTeams, vis: g.vis, allowed: g.vis === 'privada' ? [...new Set(g.allowed.concat(meId() ? [meId()] : []))] : [], created: Date.now(), createdBy: meId() });
     S.games[n.id] = n; persist('games', n.id);
     S.ui.gameId = n.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0); toast(`Marcado para ${fmtDay(date).toLowerCase()}.`);
   },
@@ -2418,33 +2496,39 @@ const ACT = {
     keepFormInputs(() => renderSheet());
   },
   pickPhoto: () => { const i = $('#photoInput'); i.value = ''; i.click(); },
-  removePhoto: () => { if (!S.ui.form) return; S.ui.form.photo = ''; keepFormInputs(() => renderSheet()); },
+  removePhoto: () => { if (!S.ui.form) return; S.ui.form.photo = ''; S.ui.form.photoBig = ''; keepFormInputs(() => renderSheet()); },
   savePlayer: () => {
     const f = S.ui.form; if (!f) return;
     const name = $('#pName').value.trim().slice(0, 60), nick = $('#pNick').value.trim().slice(0, 16);
     if (!name) { $('#pErr').textContent = 'Escreva o nome do jogador.'; $('#pName').focus(); return; }
+    const hTxt = (($('#pHeight') || {}).value || '').replace(/\D/g, ''), aTxt = (($('#pAge') || {}).value || '').replace(/\D/g, '');
+    const height = hTxt ? Number(hTxt) : null, age = aTxt ? Number(aTxt) : null;
+    if (height != null && (height < 120 || height > 230)) { $('#pErr').textContent = 'Altura em centímetros, entre 120 e 230. Exemplo: 182.'; $('#pHeight').focus(); return; }
+    if (age != null && (age < 8 || age > 90)) { $('#pErr').textContent = 'Idade entre 8 e 90.'; $('#pAge').focus(); return; }
+    const birthYear = age != null ? new Date().getFullYear() - age : null;
     const bad = document.querySelector('.rng-num.bad');
     if (bad) { $('#pErr').textContent = 'Tem nota fora da faixa permitida. Corrija o número em vermelho.'; bad.focus(); return; }
     const cap = f.max || 90;
     if (f.pid && RAW(f.pid)) {
       const raw = RAW(f.pid);
       if (!canEditPlayer(P(f.pid))) return closeSheet();
-      Object.assign(raw, { name, nick, pos: f.pos, pos2: f.pos2.slice(), photo: f.photo, updated: Date.now() });
+      const hadPhoto = !!raw.photo;
+      Object.assign(raw, { name, nick, pos: f.pos, pos2: f.pos2.slice(), photo: f.photo, height, birthYear: age != null ? (ageOf(raw) === age ? raw.birthYear : birthYear) : null, updated: Date.now() });
       if (f.notes === 'base') { const at = {}; for (const a of ATTRS) at[a] = clamp(Math.round(f.at[a]), 40, cap); raw.base = { at, forma: null }; }
       else if (f.notes === 'adj') {
         const changed = {};
         for (const a of ATTRS) if (Math.abs(f.at[a] - f.start[a]) > 1e-9) changed[a] = clamp(Math.round(f.at[a]), 40, 99);
         if (Object.keys(changed).length) raw.adj = (raw.adj || []).concat([{ t: adjTime(), at: changed }]);
       }
-      persist('players', raw.id); closeSheet(); render(); toast(f.kind === 'self' ? 'Sua carta foi salva.' : 'Jogador salvo.');
+      persist('players', raw.id, 0, () => savePhotoBig(raw.id, f, hadPhoto)); closeSheet(); render(); toast(f.kind === 'self' ? 'Sua carta foi salva.' : 'Jogador salvo.');
       return;
     }
     const at = {}; for (const a of ATTRS) at[a] = clamp(Math.round(f.at[a]), 40, cap);
     const id = f.kind === 'self' ? meId() : f.kind === 'guest' ? 'g_' + uid('') : uid('p');
     if (!id || (f.kind === 'self' && S.players[id])) return closeSheet();
     const who = FBM() ? { ownerUid: f.kind === 'self' ? meId() : null, guest: f.kind === 'guest', createdBy: meId() } : {};
-    const p = cleanPlayer(id, Object.assign({ name, nick, pos: f.pos, pos2: f.pos2, level: f.level, photo: f.photo, base: { at }, adj: [], created: Date.now(), updated: Date.now() }, who));
-    S.players[p.id] = p; persist('players', p.id);
+    const p = cleanPlayer(id, Object.assign({ name, nick, pos: f.pos, pos2: f.pos2, level: f.level, photo: f.photo, height, birthYear, base: { at }, adj: [], created: Date.now(), updated: Date.now() }, who));
+    S.players[p.id] = p; persist('players', p.id, 0, () => savePhotoBig(p.id, f, false));
     const gid = f.forGame;
     if (gid && S.games[gid] && S.games[gid].status !== 'encerrado') {
       if (FBM()) presenceSet(S.games[gid], p.id, true);
@@ -2458,6 +2542,7 @@ const ACT = {
     if (!canEditPlayer(P(id)) || (FBM() && !(P(id) || {}).guest)) return;
     openSheet({ type: 'confirm', title: 'Apagar jogador?', text: `${nameOf(id)} sai do elenco e das listas de presença dos próximos jogos. Os jogos com placar continuam valendo para os outros.`, ok: 'Apagar jogador', danger: true, run: () => {
       delete S.players[id]; persist('players', id);
+      if (FB() && S.db.deletePhoto) S.db.deletePhoto(id).catch(() => { });
       for (const g of Object.values(S.games)) {
         if (g.status === 'encerrado') continue;
         if (!(g.conf.includes(id) || g.paid.includes(id))) continue;
@@ -2519,6 +2604,7 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => { const el = e.target.closest && e.target.closest('[data-change]'); if (el && CHG[el.dataset.change]) CHG[el.dataset.change](el, e); });
 document.addEventListener('input', e => { const el = e.target.closest && e.target.closest('[data-input]'); if (el && INP[el.dataset.input]) INP[el.dataset.input](el, e); });
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('#zoom').innerHTML) { $('#zoom').innerHTML = ''; return; }
   if (e.key === 'Escape' && S.ui.sheet) closeSheet();
   if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('rng-num')) { e.preventDefault(); e.target.blur(); }
 });
@@ -2602,7 +2688,8 @@ window.MCloud = {
     let turmas = [];
     try { const s = await getDoc(doc(fs, 'users', u.uid)); turmas = (s.exists() && s.data().turmas) || []; } catch (e) { }
     for (const t of turmas) {
-      try { await setDoc(doc(fs, 'turmas', t, 'players', u.uid), { name: 'Ex-jogador', nick: 'Ex-jogador', photo: '' }, { merge: true }); } catch (e) { }
+      try { await setDoc(doc(fs, 'turmas', t, 'players', u.uid), { name: 'Ex-jogador', nick: 'Ex-jogador', photo: '', height: null, birthYear: null }, { merge: true }); } catch (e) { }
+      try { await deleteDoc(doc(fs, 'turmas', t, 'photos', u.uid)); } catch (e) { }
       try { await deleteDoc(doc(fs, 'turmas', t, 'membros', u.uid)); } catch (e) { }
     }
     try { await deleteDoc(doc(fs, 'users', u.uid)); } catch (e) { }
@@ -2623,7 +2710,7 @@ window.MCloud = {
   // Apaga a turma inteira: partidas, cartas e membros primeiro, e por último a própria turma.
   async deleteTurma(t, uid) {
     const refs = [];
-    for (const kind of ['games', 'players', 'membros']) {
+    for (const kind of ['games', 'photos', 'players', 'membros']) {
       const s = await guard(getDocs(collection(fs, 'turmas', t, kind)));
       s.docs.forEach(d => { if (!(kind === 'membros' && d.id === uid)) refs.push(d.ref); });
     }
@@ -2659,7 +2746,11 @@ window.MCloud = {
       // Confirmação do placar: cada um só grava a própria, presa à versão atual do placar.
       confirm: (gid, uid, rev) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { [`confirms.${uid}`]: rev })),
       // Trava das notas iniciais depois do primeiro jogo que vale.
-      lockCard: pid => guard(updateDoc(doc(fs, 'turmas', t, 'players', pid), { locked: true }))
+      lockCard: pid => guard(updateDoc(doc(fs, 'turmas', t, 'players', pid), { locked: true })),
+      // Foto grande fica separada da carta e só é baixada quando alguém abre a foto.
+      getPhoto: pid => guard(getDoc(doc(fs, 'turmas', t, 'photos', pid)).then(s => (s.exists() ? s.data().big || '' : ''))),
+      setPhoto: (pid, big) => guard(setDoc(doc(fs, 'turmas', t, 'photos', pid), { big, updated: Date.now() })),
+      deletePhoto: pid => guard(deleteDoc(doc(fs, 'turmas', t, 'photos', pid)))
     };
   }
 };
