@@ -1,6 +1,6 @@
 // Manchete: deixa o app abrir mesmo sem internet no ginásio.
 // A página sempre tenta a versão nova primeiro; sem rede, usa a última salva.
-const CACHE = 'manchete-v2';
+const CACHE = 'manchete-v3';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -23,7 +23,7 @@ self.addEventListener('fetch', e => {
       .catch(() => caches.match('./index.html').then(r => r || caches.match('./'))));
     return;
   }
-  const fonts = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
+  const fonts = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com' || (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/'));
   if (url.origin === self.location.origin || fonts) {
     e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
       if (res.ok || res.type === 'opaque') { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }

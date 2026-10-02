@@ -59,6 +59,10 @@ img{max-width:100%}
 .mode{font-size:12px; color:var(--muted); text-align:right; line-height:1.2}
 .icon-btn{width:40px; height:40px; border-radius:50%; display:grid; place-items:center; color:var(--ink); border:1px solid var(--line)}
 .icon-btn svg{width:20px; height:20px}
+.me-btn{width:40px; height:40px; border-radius:50%; display:grid; place-items:center; padding:0; box-shadow:0 0 0 2px var(--ball)}
+.me-btn .av{width:36px; height:36px}
+.me-card{display:grid; grid-template-columns:150px 1fr; gap:16px; align-items:center; margin-bottom:6px}
+.board .btn.board-ghost{background:transparent; color:var(--board-ink); border:1px solid var(--board-line)}
 .back{display:flex; align-items:center; gap:6px; font-weight:600; font-size:15px; padding:8px 4px; margin-left:-4px}
 .back svg{width:18px; height:18px}
 
@@ -358,6 +362,14 @@ html::after{content:""; position:fixed; left:0; right:0; top:0; height:env(safe-
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="photoInput" accept="image/*" class="sr" tabindex="-1" aria-hidden="true">
 <input type="file" id="backupInput" accept="application/json,.json" class="sr" tabindex="-1" aria-hidden="true">
+<script>window.MANCHETE_FIREBASE = {
+  "apiKey": "AIzaSyCBfUBwCrfB8cJwMeJah3dTb1KVKipeYLQ",
+  "authDomain": "manchete-3df1d.firebaseapp.com",
+  "projectId": "manchete-3df1d",
+  "storageBucket": "manchete-3df1d.firebasestorage.app",
+  "messagingSenderId": "631242104059",
+  "appId": "1:631242104059:web:31b9b271fee588eb34245e"
+};</script>
 <script>
 
 'use strict';
@@ -732,9 +744,9 @@ const POS_OFFSET = {
   lib: { rec: 8, def: 8, ata: -10, blo: -10 },
   cor: {}
 };
-function presetAt(level, pos) {
+function presetAt(level, pos, max = 90) {
   const b = (LEVELS[level] || LEVELS.exp).base, off = POS_OFFSET[pos] || {}, at = {};
-  for (const a of ATTRS) at[a] = clamp(b + (off[a] || 0), 40, 90);
+  for (const a of ATTRS) at[a] = clamp(b + (off[a] || 0), 40, max);
   return at;
 }
 const EV_PL = { ace: ['ace', 'aces'], es: ['erro de saque', 'erros de saque'], ep: ['erro de passe', 'erros de passe'], el: ['erro de levantamento', 'erros de levantamento'], ap: ['ponto de ataque', 'pontos de ataque'], ea: ['erro de ataque', 'erros de ataque'], bl: ['ponto de bloqueio', 'pontos de bloqueio'], df: ['defesa', 'defesas'] };
@@ -768,8 +780,12 @@ const S = {
   mode: 'loading', canWrite: true, db: null,
   players: {}, games: {},
   ui: { tab: 'jogos', gameId: null, step: null, selP: null, swapSel: null, sort: 'ovr', rankSort: 'ovr', openRep: null, flash: '', sheet: null, form: null, pendingRender: false },
-  migrateOffer: false
+  migrateOffer: false,
+  me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false
 };
+const FBM = () => !!window.MANCHETE_FIREBASE;
+const FB = () => FBM() && S.mode === 'cloud' && !!S.me && !!S.turmaId;
+const meId = () => (S.me ? S.me.uid : null);
 const PEND = {};
 const LS_KEY = 'manchete:v1';
 
@@ -785,6 +801,9 @@ function cleanPlayer(id, d) {
     id, name: str(d.name, 60) || 'Sem nome', nick: str(d.nick, 16), pos,
     pos2: Array.isArray(d.pos2) ? [...new Set(d.pos2.filter(x => POS[x] && x !== pos))].slice(0, 2) : [],
     level: LEVELS[d.level] ? d.level : null,
+    ownerUid: typeof d.ownerUid === 'string' ? d.ownerUid : null,
+    guest: d.guest === true,
+    createdBy: typeof d.createdBy === 'string' ? d.createdBy : null,
     photo: (typeof d.photo === 'string' && d.photo.length < 200000 && PHOTO_RE.test(d.photo)) ? d.photo : '',
     created: numOr(d.created, 0), updated: numOr(d.updated, 0),
     base: d.base && typeof d.base === 'object' && d.base.at ? { at: cleanAt(d.base.at), forma: typeof d.base.forma === 'number' ? clamp(d.base.forma, 40, 99) : null } : null,
@@ -817,7 +836,8 @@ function cleanGame(id, d) {
       pa: s && typeof s.pa === 'number' ? s.pa : null, pb: s && typeof s.pb === 'number' ? s.pb : null
     })) : [],
     log: Array.isArray(d.log) ? d.log.filter(e => e && typeof e.p === 'string' && EVENTS[e.e]).slice(-3000).map(e => ({ p: e.p, e: e.e, t: numOr(e.t, 0) })) : [],
-    created: numOr(d.created, 0), finishedAt: numOr(d.finishedAt, 0)
+    created: numOr(d.created, 0), finishedAt: numOr(d.finishedAt, 0),
+    createdBy: typeof d.createdBy === 'string' ? d.createdBy : null
   };
   const idxMap = o => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && v >= 0 && v <= 60) r[k] = Math.round(v); return r; };
   g.join = idxMap(d.join); g.leave = idxMap(d.leave);
@@ -847,6 +867,7 @@ function adjTime() {
 }
 // Converte dados da versão anterior (carta gravada) para o formato novo (carta recalculada), sem mudar nenhum número.
 function upgradeData() {
+  if (FBM()) return;
   const up = Object.values(S.players).filter(p => !p.base);
   const oldGames = Object.values(S.games).filter(g => g.legacyBefore);
   if (!up.length && !oldGames.length) return;
@@ -898,6 +919,7 @@ async function flush(key) {
   } catch (e) {
     const code = e && e.code;
     if (code === 'unavailable' && st.tries < 2) { st.tries++; st.dirty = true; st.saving = false; st.timer = setTimeout(() => flush(key), 600 + Math.random() * 900); return; }
+    if (FBM() && code === 'permission-denied') { toast('Você não tem permissão para mudar isso.'); delete PEND[key]; resync(); return; }
     if (code === 'invalid_argument' || code === 'revoked' || code === 'not_granted') { S.canWrite = false; toast('Você pode ver, mas não editar este app.'); render(); }
     else if (code === 'quota_exceeded') toast('O espaço do app encheu. Apague jogos antigos para liberar.');
     else toast('Não consegui salvar agora. Tente de novo em instantes.');
@@ -955,25 +977,29 @@ function applySnapshot(kind, snap) {
 function subscribe() {
   const got = { players: false, games: false }, firm = { players: false, games: false };
   for (const kind of ['players', 'games']) {
-    const listen = (attempt) => S.db.collection(kind).onSnapshot(snap => {
+    const listen = (attempt) => { const off = S.db.collection(kind).onSnapshot(snap => {
       applySnapshot(kind, snap);
       got[kind] = true;
       if (!snap.metadata.fromCache) firm[kind] = true;
-      if (got.players && got.games && S.mode === 'loading-cloud') S.mode = 'cloud';
+      if (got.players && got.games && S.mode === 'loading-cloud') {
+        S.mode = 'cloud';
+        if (FB() && !S.players[meId()]) setTimeout(() => { if (FB() && !S.players[meId()] && !S.ui.sheet) ACT.newSelf(); }, 60);
+      }
       if (got.players && got.games && S.mode === 'cloud') upgradeData();
       if (firm.players && firm.games) checkMigration();
       if (S.mode === 'cloud') render();
     }, err => {
+      if (FBM() && err && err.code === 'permission-denied') return lostTurma();
       if (err && err.code === 'unavailable' && attempt < 3) setTimeout(() => listen(attempt + 1), 2000 * (attempt + 1));
       else if (err && err.code === 'revoked') { S.canWrite = false; render(); }
       else if (S.mode === 'loading-cloud') { S.loadErr = true; render(); }
-    });
+    }); S.unsubs.push(off); return off; };
     listen(0);
   }
 }
 let migrateChecked = false;
 function checkMigration() {
-  if (migrateChecked) return;
+  if (migrateChecked || FBM()) return;
   migrateChecked = true;
   if (Object.keys(S.players).length || Object.keys(S.games).length) return;
   const d = readLocal();
@@ -995,6 +1021,7 @@ async function migrate() {
 }
 async function boot() {
   render();
+  if (FBM()) return bootFirebase();
   if (!window.claude || typeof window.claude.use !== 'function') return startLocal();
   try {
     const db = await window.claude.use('db');
@@ -1008,6 +1035,85 @@ async function boot() {
     setTimeout(() => { if (S.mode === 'loading-cloud') { S.loadErr = true; render(); } }, 15000);
   } catch (e) { startLocal(); }
 }
+
+// ---------- Modo com conta (Firebase) ----------
+const LS_INVITE = 'manchete:convite';
+function parseInvite(text) {
+  const m = String(text || '').match(/[?&]t=([\w-]{6,40}).*?[?&]c=([\w-]{4,40})/) || String(text || '').match(/[?&]c=([\w-]{4,40}).*?[?&]t=([\w-]{6,40})/);
+  if (!m) return null;
+  const t = /[?&]t=([\w-]+)/.exec(text)[1], c = /[?&]c=([\w-]+)/.exec(text)[1];
+  const n = /[?&]n=([^&#]*)/.exec(text);
+  let name = '';
+  try { name = n ? decodeURIComponent(n[1].replace(/\+/g, ' ')).slice(0, 40) : ''; } catch (e) { }
+  return { t, c, n: name };
+}
+function readInvite() {
+  const fromUrl = parseInvite(location.search);
+  if (fromUrl) { try { localStorage.setItem(LS_INVITE, JSON.stringify(fromUrl)); } catch (e) { } try { history.replaceState(null, '', location.pathname); } catch (e) { } return fromUrl; }
+  try { return JSON.parse(localStorage.getItem(LS_INVITE)) || null; } catch (e) { return null; }
+}
+function clearInvite() { try { localStorage.removeItem(LS_INVITE); } catch (e) { } }
+function inviteLink() {
+  if (!S.turma) return '';
+  return `${location.origin}${location.pathname}?t=${encodeURIComponent(S.turmaId)}&c=${encodeURIComponent(S.turma.inviteCode)}&n=${encodeURIComponent(S.turma.name || '')}`;
+}
+const standalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+function stopListening() { for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } } }
+function resetData() { S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
+function bootFirebase() {
+  S.mode = 'auth-wait'; S.invite = readInvite(); render();
+  const go = () => { if (S.authOff) return; S.authOff = window.MCloud.onAuth(u => onAuthChange(u)); };
+  if (window.MCloud) go(); else window.addEventListener('mcloud-ready', go, { once: true });
+  setTimeout(() => { if (!window.MCloud) { S.loadErr = true; S.mode = 'loading-cloud'; render(); } }, 15000);
+}
+async function onAuthChange(u) {
+  stopListening(); resetData(); closeSheet();
+  if (!u) { S.me = null; S.mode = 'signed-out'; S.authTab = S.invite ? 'criar' : 'entrar'; render(); return; }
+  S.me = u; S.mode = 'auth-wait'; render();
+  const ud = await window.MCloud.getUser(u.uid).catch(() => null);
+  if (S.pendingName) S.me.name = S.pendingName; else if (ud && ud.name) S.me.name = ud.name;
+  S.pendingName = '';
+  let t = null;
+  const inv = S.invite || readInvite();
+  if (inv) {
+    try { await window.MCloud.joinTurma(inv.t, inv.c, S.me); t = inv.t; S.joined = true; }
+    catch (e) { S.authMsg = 'Esse convite não vale mais. Peça um link novo para quem te chamou.'; }
+    S.invite = null; clearInvite();
+  }
+  if (!t && ud && ud.lastTurma) t = ud.lastTurma;
+  if (!t) { S.mode = 'no-turma'; render(); return; }
+  openTurma(t);
+}
+function openTurma(t) {
+  stopListening(); resetData();
+  S.turmaId = t; S.mode = 'loading-cloud'; S.loadErr = false; render();
+  window.MCloud.setUser(S.me.uid, { lastTurma: t }).catch(() => { });
+  S.db = window.MCloud.db(t);
+  S.unsubs.push(window.MCloud.watchTurma(t, d => { if (!d) return lostTurma(); S.turma = d; render(); }, () => lostTurma()));
+  S.unsubs.push(window.MCloud.watchMembers(t, list => { const m = {}; for (const x of list) if (x && x.uid) m[x.uid] = x; S.members = m; dirty(); render(); }, () => { }));
+  subscribe();
+  setTimeout(() => { if (S.mode === 'loading-cloud' && S.turmaId === t) { S.loadErr = true; render(); } }, 20000);
+}
+function lostTurma() {
+  if (!FBM() || S.mode === 'no-turma') return;
+  stopListening(); resetData();
+  window.MCloud.setUser(S.me.uid, { lastTurma: null }).catch(() => { });
+  S.mode = 'no-turma'; S.authMsg = 'Você não está mais nessa turma.'; render();
+}
+function resync() { if (!FB()) return; const t = S.turmaId; stopListening(); S.unsubs = []; openTurma(t); }
+function canCreate() { return S.canWrite && (!FBM() || (FB() && !!S.players[meId()])); }
+function isTurmaAdmin() { if (!FBM()) return S.canWrite; return !!(S.turma && (S.turma.admins || []).includes(meId())); }
+function canEditGame(g) { if (!S.canWrite) return false; if (!FBM()) return true; return !!g && (g.createdBy === meId() || isTurmaAdmin()); }
+function canEditPlayer(p) { if (!S.canWrite || !p) return false; if (!FBM()) return true; return p.id === meId() || (p.guest && (p.createdBy === meId() || isTurmaAdmin())); }
+function canEditNotes(p) { if (!FBM()) return true; if (!p) return false; if (p.guest) return canEditPlayer(p); return p.id === meId() && !p.n; }
+const isActive = id => !FBM() || !!S.members[id] || !!(S.players[id] && S.players[id].guest);
+const authErr = e => ({
+  'auth/invalid-email': 'Esse e-mail não parece certo.', 'auth/missing-password': 'Digite a senha.',
+  'auth/invalid-credential': 'E-mail ou senha não conferem.', 'auth/wrong-password': 'E-mail ou senha não conferem.', 'auth/user-not-found': 'E-mail ou senha não conferem.',
+  'auth/email-already-in-use': 'Já existe uma conta com esse e-mail. Toque em entrar.', 'auth/weak-password': 'A senha precisa de pelo menos 6 caracteres.',
+  'auth/operation-not-allowed': 'O login por e-mail ainda não foi ativado no Firebase.', 'auth/configuration-not-found': 'O login por e-mail ainda não foi ativado no Firebase.',
+  'auth/too-many-requests': 'Muitas tentativas. Espere um pouco e tente de novo.', 'auth/network-request-failed': 'Sem internet agora. Tente de novo quando tiver sinal.'
+}[e && e.code] || 'Não deu certo. Tente de novo.');
 
 // ---------- Ajudantes de domínio ----------
 const P = id => S.players[id] ? D().view[id] : undefined;
@@ -1080,6 +1186,7 @@ function gameRow(g) {
 }
 function banners() {
   let h = '';
+  if (FB() && !S.players[meId()]) h += `<div class="banner" style="border:1px solid var(--ball);background:transparent"><span class="spacer">Crie sua carta para entrar no elenco e confirmar presença.</span><button class="btn btn-sm btn-ball" data-act="newSelf">Criar minha carta</button></div>`;
   if (S.migrateOffer && S.canWrite) h += `<div class="banner"><span class="spacer">Encontrei dados de antes salvos neste aparelho.</span><button class="btn btn-sm btn-ball" data-act="migrate">Enviar para a nuvem</button></div>`;
   if (S.mode === 'local' && needsBackup()) h += `<div class="banner"><span class="spacer">${lastBackup() ? 'Seu último backup tem mais de 2 semanas.' : 'Os dados ficam só neste celular.'} Salve um backup para não perder nada.</span><button class="btn btn-sm btn-ball" data-act="backup">Salvar backup</button></div>`;
   if (S.mode === 'cloud' && !S.canWrite) h += `<div class="banner">Você está vendo a galera. Só quem organiza edita.</div>`;
@@ -1103,17 +1210,20 @@ function renderTop() {
   const g = curGame();
   const mode = S.mode === 'local' ? 'Neste aparelho' : (S.mode === 'cloud' && !S.canWrite ? 'Só leitura' : '');
   $('#top').innerHTML = g
-    ? `<button class="back" data-act="home">${ICON.back}Jogos</button><span class="spacer"></span>${S.canWrite ? `<button class="btn btn-sm" data-act="editGame">Editar jogo</button>` : ''}`
-    : `<div class="mark"><i aria-hidden="true"></i>Manchete</div>${mode ? `<div class="mode">${esc(mode)}</div>` : ''}<button class="icon-btn" data-act="help" aria-label="Como funciona">${ICON.help}</button>`;
+    ? `<button class="back" data-act="home">${ICON.back}Jogos</button><span class="spacer"></span>${canEditGame(g) ? `<button class="btn btn-sm" data-act="editGame">Editar jogo</button>` : ''}`
+    : `<div class="mark"><i aria-hidden="true"></i>Manchete</div>${mode && !FBM() ? `<div class="mode">${esc(mode)}</div>` : ''}${FBM() && !['cloud', 'no-turma'].includes(S.mode) ? '' : `<button class="icon-btn" data-act="help" aria-label="Como funciona">${ICON.help}</button>`}${FB() ? `<button class="me-btn" data-act="perfil" aria-label="Sua carta e sua turma">${P(meId()) ? avatar(P(meId())) : `<span class="av">${esc(initials({ name: S.me.name || '?' }))}</span>`}</button>` : ''}`;
 }
 function renderTabs() {
+  if (FBM() && S.mode !== 'cloud') { $('#tabs').innerHTML = ''; return; }
   const t = S.ui.gameId ? 'jogos' : S.ui.tab;
   const tab = (k, label, icon) => `<button class="tab" data-act="tab" data-tab="${k}" ${t === k ? 'aria-current="page"' : ''}>${icon}<span>${label}</span></button>`;
   $('#tabs').innerHTML = tab('jogos', 'Jogos', ICON.cal) + tab('elenco', 'Elenco', ICON.cards) + tab('ranking', 'Ranking', ICON.podium);
 }
 function viewHTML() {
   if (S.loadErr && S.mode === 'loading-cloud') return `<div class="empty" style="margin-top:16px"><h3>Não consegui carregar</h3><p class="sub">Os dados da galera não chegaram. Confira a internet e tente de novo.</p><button class="btn btn-ball" data-act="reload">Tentar de novo</button></div>`;
-  if (S.mode === 'loading' || S.mode === 'loading-cloud') return `<div class="loading">Carregando a quadra…</div>`;
+  if (S.mode === 'loading' || S.mode === 'loading-cloud' || S.mode === 'auth-wait') return `<div class="loading">Carregando a quadra…</div>`;
+  if (S.mode === 'signed-out') return authView();
+  if (S.mode === 'no-turma') return noTurmaView();
   const g = curGame();
   if (g) return g.status === 'encerrado' ? finalView(g) : gameView(g);
   if (S.ui.tab === 'elenco') return elencoView();
@@ -1121,6 +1231,34 @@ function viewHTML() {
   return agendaView();
 }
 
+function authView() {
+  const inv = S.invite;
+  const isNew = S.authTab === 'criar';
+  return `<section class="board" style="margin-top:20px">
+    <div class="board-label">${inv ? 'Você foi convidado' : 'Bem-vindo'}</div>
+    <div class="board-day" style="font-size:40px;margin:4px 0 6px">${inv && inv.n ? esc(inv.n) : 'Manchete'}</div>
+    <div class="board-place" style="margin:0">${inv ? 'Entre ou crie sua conta para ver as cartas da turma e criar a sua.' : 'As cartas, a agenda e a súmula do vôlei da galera.'}</div>
+  </section>
+  ${!standalone() && /iPhone|iPad/.test(navigator.userAgent) ? `<div class="banner">No iPhone, toque em compartilhar e em <b>Adicionar à Tela de Início</b> antes de entrar. Depois abra pelo ícone.</div>` : ''}
+  <div class="seg seg-full" role="group" aria-label="Entrar ou criar conta" style="margin:18px 0 14px;grid-template-columns:1fr 1fr">
+    <button data-act="authTab" data-tab="entrar" aria-pressed="${!isNew}">Entrar</button><button data-act="authTab" data-tab="criar" aria-pressed="${isNew}">Criar conta</button>
+  </div>
+  ${isNew ? `<label class="field"><span>Seu nome</span><input class="input" id="aName" maxlength="40" autocomplete="name" placeholder="Como a galera te chama"></label>` : ''}
+  <label class="field"><span>E-mail</span><input class="input" id="aEmail" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false"></label>
+  <label class="field"><span>Senha</span><input class="input" id="aPass" type="password" autocomplete="${isNew ? 'new-password' : 'current-password'}" placeholder="${isNew ? 'Pelo menos 6 caracteres' : ''}"></label>
+  <div class="err" role="alert" id="aErr">${esc(S.authMsg)}</div>
+  <div style="display:grid;gap:10px;margin-top:10px">
+    <button class="btn btn-block btn-ball" data-act="${isNew ? 'signUp' : 'signIn'}" ${S.authBusy ? 'disabled' : ''}>${isNew ? 'Criar conta' : 'Entrar'}</button>
+    ${isNew ? '' : '<button class="btn btn-block btn-ghost" data-act="resetPass">Esqueci a senha</button>'}
+  </div>`;
+}
+function noTurmaView() {
+  return `<div class="empty" style="margin-top:16px"><h3>Você ainda não está numa turma</h3><p class="sub">${S.authMsg ? esc(S.authMsg) + ' ' : ''}Crie a sua e chame a galera pelo link, ou cole aqui o link de convite que te mandaram.</p></div>
+  ${section('Criar uma turma', `<label class="field"><span>Nome da turma</span><input class="input" id="tName" maxlength="40" placeholder="Ex.: Vôlei de quinta"></label><button class="btn btn-block btn-ball" data-act="createTurma">Criar turma</button>`)}
+  ${section('Tenho um convite', `<label class="field"><span>Link de convite</span><input class="input" id="tLink" autocapitalize="off" spellcheck="false" placeholder="Cole o link aqui"></label><button class="btn btn-block" data-act="joinByLink">Entrar na turma</button>`)}
+  <div class="err" role="alert" id="tErr"></div>
+  <div style="margin-top:18px"><button class="btn btn-block btn-ghost" data-act="signOut">Sair da conta</button></div>`;
+}
 function agendaView() {
   const t = todayStr();
   const all = Object.values(S.games);
@@ -1128,9 +1266,9 @@ function agendaView() {
   const past = all.filter(g => !(g.status !== 'encerrado' && g.date >= t)).sort((a, b) => byDate(b, a));
   let h = banners();
   if (up[0]) h += heroHTML(up[0]);
-  else h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${S.canWrite ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
+  else h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${canCreate() ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
   if (up.length > 1) h += section('Próximos', listBox(up.slice(1).map(gameRow)));
-  if (S.canWrite && up[0]) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="newGame">${ICON.plus}Marcar outro jogo</button></div>`;
+  if (canCreate() && up[0]) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="newGame">${ICON.plus}Marcar outro jogo</button></div>`;
   if (past.length) h += section('Anteriores', listBox(past.slice(0, 40).map(gameRow)));
   if (!Object.keys(S.players).length && S.canWrite) h += `<div class="empty" style="margin-top:20px"><h3>Cadastre a galera</h3><p class="sub">Cada jogador ganha uma carta. Depois é só confirmar presença e sortear os times.</p><button class="btn" data-act="newPlayer">${ICON.plus}Novo jogador</button></div>`;
   return h;
@@ -1145,23 +1283,29 @@ function heroHTML(g) {
     <div class="board-when"><div class="board-day">${DIAS[d.getDay()]}<br>${d.getDate()} de ${MESES[d.getMonth()]}</div><div class="board-time">${fmtTime(g.time)}</div></div>
     <div class="board-place">${esc(g.place || 'Local a definir')}</div>
     <div class="conf-line">${conf.length ? `<div class="stack">${conf.slice(0, 7).map(id => avatar(P(id))).join('')}</div>` : ''}<span>${confTxt}</span></div>
-    <button class="btn btn-block" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button>
+    ${FB() && S.players[meId()] ? (g.conf.includes(meId())
+      ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><button class="btn board-ghost" data-act="heroPres" data-id="${esc(g.id)}">Desmarcar</button><button class="btn" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button></div><div class="board-place" style="margin:10px 0 0">Você está confirmado.</div>`
+      : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><button class="btn" data-act="heroPres" data-id="${esc(g.id)}">Vou jogar</button><button class="btn board-ghost" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button></div>`)
+      : `<button class="btn btn-block" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button>`}
   </section>`;
 }
 
 function elencoView() {
-  const ps = Object.keys(S.players).map(P);
+  const mine = FB() ? P(meId()) : null;
+  const ps = Object.keys(S.players).map(P).filter(p => !mine || p.id !== mine.id);
   let h = banners();
+  if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${mine.n ? `${plural(mine.tot.jogos, 'jogo', 'jogos')}, ${mine.tot.sets ? Math.round(100 * mine.tot.setsV / mine.tot.sets) + '% dos sets ganhos' : 'sem sets ainda'}` : 'Ainda sem jogos com placar.'}</div><button class="btn btn-sm" style="margin-top:10px" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar</button></div></div>`;
   if (!ps.length) {
-    return h + `<div class="empty" style="margin-top:16px"><h3>Ninguém no elenco</h3><p class="sub">Cadastre cada jogador com uma nota de 40 a 90 em cada fundamento. A carta nasce daí e evolui a cada jogo.</p>${S.canWrite ? `<button class="btn btn-ball" data-act="newPlayer">${ICON.plus}Novo jogador</button>` : ''}</div>`;
+    return h + `<div class="empty" style="margin-top:16px"><h3>${FB() ? 'Só você por aqui' : 'Ninguém no elenco'}</h3><p class="sub">${FB() ? 'Mande o link da turma para a galera. Cada um cria a própria carta.' : 'Cadastre cada jogador com uma nota de 40 a 90 em cada fundamento. A carta nasce daí e evolui a cada jogo.'}</p>${FB() ? `<div class="row-wrap"><button class="btn btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${mine ? `<button class="btn" data-act="newGuest">${ICON.plus}Convidado sem conta</button>` : ''}</div>` : (S.canWrite ? `<button class="btn btn-ball" data-act="newPlayer">${ICON.plus}Novo jogador</button>` : '')}</div>`;
   }
   const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), nome: (a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'), pos: (a, b) => Object.keys(POS).indexOf(a.pos) - Object.keys(POS).indexOf(b.pos) || ovrOf(b) - ovrOf(a) };
   ps.sort(sorters[S.ui.sort] || sorters.ovr);
   const chip = (k, l) => `<button class="chip" data-act="sort" data-sort="${k}" aria-pressed="${S.ui.sort === k}">${l}</button>`;
   const mvp = mvpId();
-  h += `<div class="row" style="margin:16px 0 12px"><div class="row-wrap">${chip('ovr', 'Geral')}${chip('nome', 'Nome')}${chip('pos', 'Posição')}</div><span class="spacer"></span>${S.canWrite ? `<button class="btn btn-sm btn-ball" data-act="newPlayer">${ICON.plus}Jogador</button>` : ''}</div>`;
+  if (mine) h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">A galera</h2><button class="btn btn-sm" data-act="newGuest">${ICON.plus}Convidado</button></div>`;
+  h += `<div class="row" style="margin:${mine ? '0' : '16px'} 0 12px"><div class="row-wrap">${chip('ovr', 'Geral')}${chip('nome', 'Nome')}${chip('pos', 'Posição')}</div><span class="spacer"></span>${FB() ? '' : (S.canWrite ? `<button class="btn btn-sm btn-ball" data-act="newPlayer">${ICON.plus}Jogador</button>` : '')}</div>`;
   h += `<div class="cards">${ps.map(p => `<button class="card-btn" data-act="openPlayer" data-pid="${esc(p.id)}" aria-label="${esc(p.name)}, geral ${ovrOf(p)}">${cardHTML(p, { destaque: p.id === mvp })}</button>`).join('')}</div>`;
-  h += `<p class="sub small" style="margin-top:14px">${plural(ps.length, 'jogador', 'jogadores')}. Toque numa carta para ver a evolução.</p>`;
+  h += `<p class="sub small" style="margin-top:14px">${plural(ps.length + (mine ? 1 : 0), 'jogador', 'jogadores')}. Toque numa carta para ver a evolução.${FB() ? ' Convidado é quem joga sem conta, e a carta dele fica com quem criou.' : ''}</p>`;
   return h;
 }
 
@@ -1206,10 +1350,10 @@ function gameView(g) {
   return h;
 }
 function presencaStep(g, confN) {
-  const W = S.canWrite;
+  const W = canEditGame(g);
   const conf = g.conf.filter(P);
   const confSet = new Set(conf);
-  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
+  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id) && isActive(p.id)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
   const max = g.max || Infinity;
   const wait = Math.max(0, conf.length - max);
   const paid = g.paid.filter(id => confSet.has(id)).length;
@@ -1219,17 +1363,19 @@ function presencaStep(g, confN) {
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
     <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
     ${on && W ? `<button class="paid" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(p.nick || p.name)} pagou">${g.paid.includes(p.id) ? 'Pagou' : 'Pagou?'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
-    ${W ? `<button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Vai' : 'Confirmar'}</button>` : ''}
+    ${W || (FB() && p.id === meId()) ? `<button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Vai' : (p.id === meId() ? 'Vou' : 'Confirmar')}</button>` : ''}
   </div>`;
   if (conf.length) h += listBox(conf.map((id, i) => row(P(id), i, true)));
-  if (W && others.length) h += section('Ainda não confirmaram', listBox(others.map(p => row(p, 0, false))));
-  if (W) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="newPlayer" data-forgame="1">${ICON.plus}Novo jogador neste jogo</button></div>`;
+  const shownOthers = W ? others : others.filter(p => p.id === meId());
+  if (shownOthers.length) h += section(W ? 'Ainda não confirmaram' : 'Você', listBox(shownOthers.map(p => row(p, 0, false))));
+  if (W) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="${FB() ? 'newGuest' : 'newPlayer'}" data-forgame="1">${ICON.plus}${FB() ? 'Convidado neste jogo' : 'Novo jogador neste jogo'}</button></div>`;
+  if (FB() && !W) h += `<p class="sub small" style="margin-top:10px">Quem marcou o jogo cuida dos times, da súmula e do placar.</p>`;
   if (!Object.keys(S.players).length) h += `<p class="sub" style="margin-top:10px">O elenco está vazio. Cadastre os jogadores para confirmar presença.</p>`;
-  if (conf.length >= 4) h += `<div style="margin-top:12px"><button class="btn btn-block btn-ball" data-act="step" data-step="times">Ir para os times</button></div>`;
+  if (conf.length >= 4 && W) h += `<div style="margin-top:12px"><button class="btn btn-block btn-ball" data-act="step" data-step="times">Ir para os times</button></div>`;
   return h;
 }
 function timesStep(g) {
-  const W = S.canWrite;
+  const W = canEditGame(g);
   const ids = playingIds(g);
   const T = g.nTeams;
   const locked = g.sets.length > 0;
@@ -1260,7 +1406,7 @@ function timesStep(g) {
   return h;
 }
 function sumulaStep(g) {
-  const W = S.canWrite;
+  const W = canEditGame(g);
   if (!g.teams) return `<div class="empty" style="margin-top:14px"><h3>Monte os times primeiro</h3><p class="sub">A súmula usa os times sorteados para saber quem jogou contra quem.</p><button class="btn" data-act="step" data-step="times">Ir para os times</button></div>`;
   const counts = countsFromLog(g.log);
   const members = teamIds(g).filter(P);
@@ -1294,7 +1440,7 @@ function sumulaStep(g) {
   return h;
 }
 function placarStep(g) {
-  const W = S.canWrite;
+  const W = canEditGame(g);
   if (!g.teams) return `<div class="empty" style="margin-top:14px"><h3>Monte os times primeiro</h3><p class="sub">O placar de cada set é registrado entre os times sorteados.</p><button class="btn" data-act="step" data-step="times">Ir para os times</button></div>`;
   const T = g.teams.length;
   const multi = T > 2;
@@ -1366,7 +1512,7 @@ function finalView(g) {
   h += reportBody(rows, res.mvp, res.awards, 'final');
   if (g.teams) h += section('Times', `<div class="teams">${g.teams.map((t, i) => `<div class="team"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span></div>${t.map(id => `<div class="tp"><span class="tp-name">${esc(nameOf(id))}</span><span class="tp-ovr">${rows[id] ? rows[id].ovrAfter : ''}</span></div>`).join('')}</div>`).join('')}</div>`, `<p class="sub small" style="margin:-4px 0 10px">Geral de cada um logo depois deste jogo.</p>`);
   h += `<div class="row-wrap" style="margin-top:16px"><button class="btn btn-sm" data-act="copyResult">${ICON.copy}Copiar resultado</button></div>`;
-  if (S.canWrite) h += `<div style="margin-top:12px;display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="nextWeek">${ICON.plus}Marcar o mesmo jogo na semana que vem</button><button class="btn btn-block" data-act="reopen">${ICON.undo}Reabrir para corrigir</button></div>`;
+  if (canCreate()) h += `<div style="margin-top:12px;display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="nextWeek">${ICON.plus}Marcar o mesmo jogo na semana que vem</button>${canEditGame(g) ? `<button class="btn btn-block" data-act="reopen">${ICON.undo}Reabrir para corrigir</button>` : ''}</div>`;
   return h;
 }
 
@@ -1379,7 +1525,8 @@ function renderSheet() {
   let title = '', body = '';
   if (s.type === 'help') { title = 'Como funciona'; body = helpHTML(); }
   else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = gameFormHTML(s.id); }
-  else if (s.type === 'playerForm') { title = S.ui.form && S.ui.form.pid ? 'Editar jogador' : 'Novo jogador'; body = playerFormHTML(); }
+  else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
+  else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
   else if (s.type === 'player') { const p = P(s.pid); if (!p) return closeSheet(); title = p.name; body = playerHTML(p); }
   else if (s.type === 'preview') { title = 'Relatório do jogo'; body = previewHTML(s.gameId); }
   else if (s.type === 'confirm') { title = s.title; body = `<p>${esc(s.text)}</p><div style="display:grid;gap:10px;margin-top:16px"><button class="btn btn-block ${s.danger ? 'btn-danger' : 'btn-ball'}" data-act="confirmOk">${esc(s.ok)}</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Cancelar</button></div>`; }
@@ -1418,8 +1565,8 @@ function helpHTML() {
   <h3>No dia do jogo</h3><p>Se a galera montou a lista no WhatsApp, use colar lista do grupo na presença: o app marca quem achar, na ordem da lista. Quem chega depois do primeiro set entra num time pela tela de times e só conta dali para frente. Se alguém for embora, toque no nome dele.</p>
   <h3>Placar</h3><p>Os pontos entram nas cartas assim que o placar é anotado. As cartas são recalculadas a partir dos jogos, então corrigir um número, até de um jogo antigo, ajusta tudo sozinho. Apagar um jogo tira o efeito dele. Encerrar só trava o jogo para ninguém mexer sem querer.</p>
   <h3>Erro de lançamento</h3><p>Errou um lance? Use desfazer na súmula. Errou o placar? Corrija o número. Se o jogo estiver encerrado, toque em reabrir para corrigir.</p>
-  <h3>Seus dados</h3><p>${S.mode === 'cloud' ? 'Os dados ficam na sua conta do Claude.' : 'Os dados ficam salvos só neste celular. Se apagar o app da Tela de Início, eles somem junto.'} O backup gera um arquivo com tudo, cartas, fotos e jogos, que você pode guardar no Arquivos ou mandar para você mesmo no WhatsApp.${lastBackup() ? ` Último backup: ${fmtDay(lastBackup()).toLowerCase()}.` : ''}</p>
-  ${S.canWrite ? `<div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="backup">Salvar backup</button><button class="btn btn-block" data-act="restore">Restaurar um backup</button></div>` : ''}
+  <h3>Seus dados</h3><p>${FBM() ? 'Os dados ficam na nuvem da turma, e cada um entra com a própria conta.' : S.mode === 'cloud' ? 'Os dados ficam na sua conta do Claude.' : 'Os dados ficam salvos só neste celular. Se apagar o app da Tela de Início, eles somem junto.'}${FBM() ? '' : ` O backup gera um arquivo com tudo, cartas, fotos e jogos, que você pode guardar no Arquivos ou mandar para você mesmo no WhatsApp.${lastBackup() ? ` Último backup: ${fmtDay(lastBackup()).toLowerCase()}.` : ''}`}</p>
+  ${S.canWrite && !FBM() ? `<div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="backup">Salvar backup</button><button class="btn btn-block" data-act="restore">Restaurar um backup</button></div>` : ''}
   </div>`;
 }
 function gameFormHTML(id) {
@@ -1454,6 +1601,23 @@ function formPlayer() {
   p.forma = cur ? cur.forma : tecnica(p);
   return p;
 }
+function perfilHTML() {
+  const mine = P(meId());
+  const admin = isTurmaAdmin(), owner = !!(S.turma && S.turma.ownerUid === meId());
+  const members = Object.values(S.members).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+  let h = mine
+    ? `<div style="max-width:180px;margin:0 auto 12px">${cardHTML(mine, { destaque: mine.id === mvpId() })}</div><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar minha carta</button>`
+    : `<div class="empty"><h3>Você ainda não tem carta</h3><p class="sub">Crie a sua para entrar no elenco e confirmar presença.</p><button class="btn btn-ball" data-act="newSelf">Criar minha carta</button></div>`;
+  h += `<p class="sub small" style="text-align:center;margin-top:10px">Conectado como ${esc(S.me.name)}, ${esc(S.me.email)}.</p>`;
+  h += section(S.turma && S.turma.name ? S.turma.name : 'Turma', `<div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link de convite</button>' : ''}</div><p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p>`);
+  h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, listBox(members.map(m => {
+    const role = S.turma && S.turma.ownerUid === m.uid ? 'Criou a turma' : (S.turma && (S.turma.admins || []).includes(m.uid) ? 'Admin' : 'Membro');
+    const canKick = admin && m.uid !== meId() && !(S.turma && S.turma.ownerUid === m.uid);
+    return `<div class="pres">${avatar(P(m.uid) || { name: m.name || '?' })}<div class="item-main"><div class="item-title">${esc(m.name || 'Sem nome')}${m.uid === meId() ? ' (você)' : ''}</div><div class="item-sub">${role}${P(m.uid) ? '' : ', ainda sem carta'}</div></div>${canKick ? `<button class="btn btn-sm btn-danger" data-act="askRemoveMember" data-uid="${esc(m.uid)}">Tirar</button>` : ''}</div>`;
+  })));
+  h += `<div style="display:grid;gap:10px;margin-top:16px">${owner ? '' : '<button class="btn btn-block btn-ghost" data-act="askLeaveTurma">Sair da turma</button>'}<button class="btn btn-block btn-ghost" data-act="signOut">Sair da conta</button></div>`;
+  return h;
+}
 function playerFormHTML() {
   const f = S.ui.form;
   const p = f.pid ? P(f.pid) : null;
@@ -1461,24 +1625,24 @@ function playerFormHTML() {
   const prev = formPlayer(), prevOvr = ovrOf(prev);
   return `<div id="formPreview" style="max-width:170px;margin:0 auto 14px">${cardHTML(formPlayer())}</div>
   <div class="row-wrap" style="justify-content:center;margin-bottom:14px"><button class="btn btn-sm" data-act="pickPhoto">${f.photo ? 'Trocar foto' : 'Escolher foto'}</button>${f.photo ? '<button class="btn btn-sm btn-ghost" data-act="removePhoto">Remover foto</button>' : ''}</div>
-  <label class="field"><span>Nome</span><input class="input" id="pName" maxlength="60" value="${esc(p ? p.name : '')}" data-input="pname" autocomplete="off"></label>
+  <label class="field"><span>Nome</span><input class="input" id="pName" maxlength="60" value="${esc(p ? p.name : (f.kind === 'self' && S.me ? S.me.name : ''))}" data-input="pname" autocomplete="off"></label>
   <label class="field"><span>Apelido na carta</span><input class="input" id="pNick" maxlength="16" value="${esc(p ? p.nick : '')}" data-input="pname" placeholder="Opcional" autocomplete="off"></label>
   <div class="field"><span>Posição principal</span><div class="pos-grid" role="group" aria-label="Posição principal">${Object.entries(POS).map(([k, v]) => `<button data-act="formPos" data-pos="${k}" aria-pressed="${f.pos === k}">${v.name}</button>`).join('')}</div></div>
   <div class="field"><span>Também joga de</span><div class="row-wrap" role="group" aria-label="Também joga de">${Object.entries(POS).filter(([k]) => k !== f.pos && k !== 'cor').map(([k, v]) => `<button class="chip" data-act="formPos2" data-pos="${k}" aria-pressed="${f.pos2.includes(k)}">${v.name}</button>`).join('')}</div><p class="sub small" style="margin-top:6px">Opcional, até duas. A carta usa a principal, e as outras ajudam o sorteio a cobrir um time sem levantador, por exemplo.</p></div>
-  ${f.pid ? '' : `<div class="field"><span>Nível de entrada</span><div class="seg seg-full" role="group" aria-label="Nível de entrada">${Object.entries(LEVELS).map(([k, v]) => `<button data-act="formLevel" data-level="${k}" aria-pressed="${f.level === k}">${v.name}</button>`).join('')}</div><p class="sub small" style="margin-top:6px">${esc(LEVELS[f.level].desc)} As notas abaixo já vêm pela posição, e você ajusta o que quiser.</p></div>`}
-  <div class="rate-block">
-    <div class="live"><span class="live-label">${f.pid ? 'Ajuste fino dos fundamentos' : 'Como joga hoje'}</span><span class="live-ovr"><span class="live-sw t-${tierOf(prevOvr).key}" id="formLiveTier"></span>Geral <b id="formLiveVal">${prevOvr}</b></span></div>
+  ${f.pid || f.notes === 'locked' ? '' : `<div class="field"><span>Nível de entrada</span><div class="seg seg-full" role="group" aria-label="Nível de entrada">${Object.entries(LEVELS).map(([k, v]) => `<button data-act="formLevel" data-level="${k}" aria-pressed="${f.level === k}">${v.name}</button>`).join('')}</div><p class="sub small" style="margin-top:6px">${esc(LEVELS[f.level].desc)} As notas abaixo já vêm pela posição, e você ajusta o que quiser.</p></div>`}
+  ${f.notes === 'locked' ? `<div class="banner">Suas notas agora só mudam jogando. Foto, apelido e posições você muda quando quiser.</div>` : `<div class="rate-block">
+    <div class="live"><span class="live-label">${f.notes === 'adj' ? 'Ajuste fino dos fundamentos' : 'Como joga hoje'}</span><span class="live-ovr"><span class="live-sw t-${tierOf(prevOvr).key}" id="formLiveTier"></span>Geral <b id="formLiveVal">${prevOvr}</b></span></div>
     ${sliders}
   </div>
-  ${f.pid ? '<p class="sub small">Mexa só para corrigir. O normal é a carta mudar pelo placar e pela súmula. Toque no número para digitar.</p>' : '<p class="sub small">Toque no número para digitar, de 40 a 90. Na dúvida, chute para baixo: nos primeiros jogos a carta se ajusta rápido.</p>'}
+  <p class="sub small">${f.notes === 'adj' ? 'Mexa só para corrigir. O normal é a carta mudar pelo placar e pela súmula. Toque no número para digitar.' : f.max === 80 ? 'Toque no número para digitar, de 40 a 80. Na sua própria carta o teto é 80, e daí para cima só jogando. Depois do primeiro jogo as notas travam.' : 'Toque no número para digitar, de 40 a 90. Na dúvida, chute para baixo: nos primeiros jogos a carta se ajusta rápido.'}</p>`}
   <div id="pErr" class="err" role="alert"></div>
-  <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-ball" data-act="savePlayer">${f.pid ? 'Salvar jogador' : 'Criar carta'}</button>
-  ${f.pid ? `<button class="btn btn-block btn-danger" data-act="askDeletePlayer" data-pid="${esc(f.pid)}">Apagar jogador</button>` : ''}</div>`;
+  <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-ball" data-act="savePlayer">${f.pid ? 'Salvar' : 'Criar carta'}</button>
+  ${f.pid && f.kind !== 'self' ? `<button class="btn btn-block btn-danger" data-act="askDeletePlayer" data-pid="${esc(f.pid)}">${f.kind === 'guest' ? 'Apagar convidado' : 'Apagar jogador'}</button>` : ''}</div>`;
 }
 const valHTML = v => String(v);
 const rngText = v => String(v);
 function rngHTML(a, f) {
-  const max = f.pid ? 99 : 90;
+  const max = f.max || (f.pid ? 99 : 90);
   const v = clamp(Math.round(f.at[a]), 40, max);
   const nudge = d => `<button class="nudge" data-act="nudge" data-nudge="${d}" data-attr="${a}" aria-label="${d > 0 ? 'Aumentar' : 'Diminuir'} ${ATTR[a].name.toLowerCase()}">${d > 0 ? '+' : '−'}</button>`;
   return `<div class="rng-row"><div class="rng-head"><span class="rng-name" id="l_${a}">${ATTR[a].name}</span><input class="rng-num" id="o_${a}" value="${v}" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" enterkeyhint="done" data-input="num" data-attr="${a}" data-max="${max}" aria-label="Nota de ${ATTR[a].name.toLowerCase()}, de 40 a ${max}" aria-describedby="e_${a}"></div>
@@ -1605,10 +1769,14 @@ function playerHTML(p) {
   const hist = p.hist.map(h => h.ovr);
   let h = `<div class="card-lg" style="margin-bottom:14px">${cardHTML(p, { destaque: p.id === mvpId() })}</div>`;
   h += `<p class="sub" style="text-align:center">${esc(posLabel(p))}. Técnica ${fmtN(tecnica(p))}, forma ${fmtN(p.forma)}.</p>`;
+  if (FB()) {
+    const tag = p.id === meId() ? 'Esta é a sua carta.' : p.guest ? `Convidado, cuidado por ${esc((S.members[p.createdBy] || {}).name || 'alguém da turma')}.` : (!S.members[p.id] ? 'Saiu da turma.' : '');
+    if (tag) h += `<p class="sub small" style="text-align:center">${tag}</p>`;
+  }
   if (p.calib || p.level) h += `<p class="sub small" style="text-align:center">${p.level ? `Entrou como ${LEVELS[p.level].name.toLowerCase()}. ` : ''}${p.calib ? `Em calibração: ${CALIB.length - p.n === 1 ? 'falta 1 jogo' : `faltam ${CALIB.length - p.n} jogos`} para a carta firmar, e até lá ela anda mais rápido.` : ''}</p>`;
   if (hist.length >= 2) h += section('Evolução', `<div class="list" style="padding:10px 12px">${spark(hist)}<div class="row sub small"><span>${hist[0]}</span><span class="spacer"></span><span>${plural(hist.length - 1, 'jogo', 'jogos')}</span><span class="spacer"></span><span>${hist[hist.length - 1]}</span></div></div>`);
   h += section('Na temporada', `<div class="stats">${stat(t.jogos, 'Jogos')}${stat(t.sets ? Math.round(100 * t.setsV / t.sets) + '%' : '–', 'Sets ganhos')}${stat(t.notaN ? fmtN(t.notaSum / t.notaN) : '–', 'Nota média')}${stat(t.mvp, 'MVPs')}${stat(t.ace, 'Aces')}${stat(t.es, 'Erros de saque')}${stat(t.ep, 'Erros de passe')}${stat(t.ap, 'Pontos de ataque')}${stat(t.bl, 'Bloqueios')}${stat(t.df, 'Defesas')}${stat(t.ea, 'Erros de ataque')}${stat(t.el, 'Erros de toque')}</div>`);
-  if (S.canWrite) h += `<div style="margin-top:16px"><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(p.id)}">Editar jogador</button></div>`;
+  if (canEditPlayer(p)) h += `<div style="margin-top:16px"><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(p.id)}">${p.id === meId() ? 'Editar minha carta' : 'Editar jogador'}</button></div>`;
   return h;
 }
 function spark(v) {
@@ -1627,7 +1795,7 @@ function previewHTML(gid) {
   return `${warn}<p class="sub">As cartas já estão com esse placar. Encerrar só trava o jogo, e dá para reabrir se precisar corrigir.</p>
     <div class="total" style="text-align:left;margin:4px 0 8px">${esc(scoreline(g) || '')}</div>
     ${reportBody(res.players, res.mvp, res.awards, 'preview')}
-    <div style="display:grid;gap:10px;margin-top:16px"><button class="btn btn-block btn-ball" data-act="closeGame">Encerrar jogo</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Voltar para o jogo</button></div>`;
+    <div style="display:grid;gap:10px;margin-top:16px">${canEditGame(g) ? '<button class="btn btn-block btn-ball" data-act="closeGame">Encerrar jogo</button>' : ''}<button class="btn btn-block btn-ghost" data-act="closeSheet">Voltar para o jogo</button></div>`;
 }
 
 // ---------- Lista do WhatsApp ----------
@@ -1717,6 +1885,17 @@ function readBackup(file) {
   fr.readAsText(file);
 }
 
+// ---------- Presença no modo com conta: muda só a própria linha, sem sobrescrever a dos outros ----------
+function presenceSet(g, id, on) {
+  if (on) { if (!g.conf.includes(id)) g.conf.push(id); }
+  else g.conf = g.conf.filter(x => x !== id);
+  const paidChanged = !on && g.paid.includes(id) && canEditGame(g);
+  if (paidChanged) g.paid = g.paid.filter(x => x !== id);
+  dirty(); render();
+  S.db.presence(g.id, id, on).catch(e => { toast(e && e.code === 'permission-denied' ? 'Você não tem permissão para isso.' : 'Não consegui salvar a presença. Tente de novo.'); resync(); });
+  if (paidChanged) persist('games', g.id);
+}
+
 // ---------- Textos para copiar ----------
 function inviteText(g) {
   const conf = g.conf.filter(P);
@@ -1802,6 +1981,65 @@ const ACT = {
   help: () => openSheet({ type: 'help' }),
   closeSheet: () => closeSheet(),
   migrate: () => migrate(),
+  authTab: el => { S.authTab = el.dataset.tab; S.authMsg = ''; render(); },
+  signIn: async el => {
+    const email = ($('#aEmail').value || '').trim(), pass = $('#aPass').value || '', err = $('#aErr');
+    if (!email || !pass) { err.textContent = 'Preencha e-mail e senha.'; return; }
+    el.disabled = true; err.textContent = '';
+    try { await window.MCloud.signIn(email, pass); } catch (e) { err.textContent = authErr(e); el.disabled = false; }
+  },
+  signUp: async el => {
+    const name = ($('#aName').value || '').trim().slice(0, 40), email = ($('#aEmail').value || '').trim(), pass = $('#aPass').value || '', err = $('#aErr');
+    if (!name) { err.textContent = 'Escreva seu nome.'; return; }
+    if (!email) { err.textContent = 'Escreva seu e-mail.'; return; }
+    if (pass.length < 6) { err.textContent = 'A senha precisa de pelo menos 6 caracteres.'; return; }
+    el.disabled = true; err.textContent = ''; S.pendingName = name;
+    try { await window.MCloud.signUp(name, email, pass); } catch (e) { S.pendingName = ''; err.textContent = authErr(e); el.disabled = false; }
+  },
+  resetPass: async () => {
+    const email = ($('#aEmail').value || '').trim(), err = $('#aErr');
+    if (!email) { err.textContent = 'Escreva seu e-mail acima e toque de novo.'; return; }
+    try { await window.MCloud.resetPassword(email); err.textContent = ''; toast('Se esse e-mail tiver conta, chega um link para criar uma senha nova.'); } catch (e) { err.textContent = authErr(e); }
+  },
+  signOut: async () => { closeSheet(); try { await window.MCloud.signOut(); } catch (e) { toast('Não consegui sair agora.'); } },
+  createTurma: async el => {
+    const name = ($('#tName').value || '').trim().slice(0, 40), err = $('#tErr');
+    if (!name) { err.textContent = 'Dê um nome para a turma.'; return; }
+    el.disabled = true;
+    try { const r = await window.MCloud.createTurma(name, S.me); S.authMsg = ''; openTurma(r.id); }
+    catch (e) { err.textContent = 'Não consegui criar a turma. Confira a internet e tente de novo.'; el.disabled = false; }
+  },
+  joinByLink: async el => {
+    const inv = parseInvite($('#tLink').value || ''), err = $('#tErr');
+    if (!inv) { err.textContent = 'Esse link não parece um convite do Manchete.'; return; }
+    el.disabled = true;
+    try { await window.MCloud.joinTurma(inv.t, inv.c, S.me); S.authMsg = ''; openTurma(inv.t); }
+    catch (e) { err.textContent = 'Esse convite não vale mais. Peça um link novo para quem te chamou.'; el.disabled = false; }
+  },
+  perfil: () => { if (FB()) openSheet({ type: 'perfil' }); },
+  shareInvite: async () => {
+    const url = inviteLink(); if (!url) return;
+    const name = S.turma.name || 'da galera';
+    try { if (navigator.share) { await navigator.share({ title: 'Manchete', text: `Entra na turma ${name} no Manchete e cria sua carta:`, url }); return; } }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+    copyText(`Entra na turma ${name} no Manchete e cria sua carta: ${url}`);
+  },
+  askNewInvite: () => {
+    if (!isTurmaAdmin()) return;
+    openSheet({ type: 'confirm', title: 'Trocar o link?', text: 'O link antigo para de funcionar para quem ainda não entrou. Quem já está na turma continua.', ok: 'Trocar o link', run: async () => {
+      try { await window.MCloud.newInvite(S.turmaId); closeSheet(); toast('Link novo pronto. Toque em convidar para mandar.'); } catch (e) { toast('Não consegui trocar o link.'); }
+    } });
+  },
+  askRemoveMember: el => {
+    const u = el.dataset.uid; if (!isTurmaAdmin() || !u) return;
+    const name = (S.members[u] || {}).name || 'essa pessoa';
+    openSheet({ type: 'confirm', title: `Tirar ${name}?`, text: 'Sai da turma e não vê mais nada. A carta e os jogos continuam no histórico.', ok: 'Tirar da turma', danger: true, run: async () => {
+      try { await window.MCloud.removeMember(S.turmaId, u); closeSheet(); toast(`${name} saiu da turma.`); } catch (e) { toast('Não consegui tirar agora.'); }
+    } });
+  },
+  askLeaveTurma: () => openSheet({ type: 'confirm', title: 'Sair da turma?', text: 'Você deixa de ver a turma. Para voltar, precisa de um link de convite.', ok: 'Sair da turma', danger: true, run: async () => {
+    try { await window.MCloud.leaveTurma(S.turmaId, meId()); closeSheet(); lostTurma(); S.authMsg = ''; render(); } catch (e) { toast('Não consegui sair agora.'); }
+  } }),
   backup: () => exportBackup(),
   restore: () => { const i = $('#backupInput'); i.value = ''; i.click(); },
   reload: () => location.reload(),
@@ -1810,7 +2048,7 @@ const ACT = {
   openGame: el => { S.ui.gameId = el.dataset.id; S.ui.step = null; S.ui.selP = null; S.ui.swapSel = null; S.ui.openRep = null; S.ui.flash = ''; render(); window.scrollTo(0, 0); },
   step: el => { S.ui.step = el.dataset.step; S.ui.swapSel = null; render(); window.scrollTo(0, 0); },
   newGame: () => openSheet({ type: 'gameForm' }),
-  editGame: () => { const g = curGame(); if (g) openSheet({ type: 'gameForm', id: g.id }); },
+  editGame: () => { const g = curGame(); if (g && canEditGame(g)) openSheet({ type: 'gameForm', id: g.id }); },
   saveGame: el => {
     const date = $('#fDate').value, time = $('#fTime').value || '20:00';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { $('#fErr').textContent = 'Escolha o dia do jogo.'; return; }
@@ -1818,25 +2056,29 @@ const ACT = {
     const place = $('#fPlace').value.trim().slice(0, 80), note = $('#fNote').value.trim().slice(0, 300);
     const id = el.dataset.id;
     if (id && S.games[id]) {
+      if (!canEditGame(S.games[id])) return closeSheet();
       Object.assign(S.games[id], { date, time, max, place, note });
       persist('games', id); closeSheet(); render(); toast('Jogo salvo.');
     } else {
       const last = Object.values(S.games).sort(byDate).pop();
-      const g = cleanGame(uid('g'), { date, time, max, place, note, created: Date.now(), track: last ? last.track : ['saq', 'rec'], nTeams: last ? last.nTeams : 2 });
+      if (!canCreate()) return closeSheet();
+      const g = cleanGame(uid('g'), { date, time, max, place, note, created: Date.now(), createdBy: meId(), track: last ? last.track : ['saq', 'rec'], nTeams: last ? last.nTeams : 2 });
       S.games[g.id] = g; persist('games', g.id);
       closeSheet(); S.ui.gameId = g.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0); toast('Jogo marcado.');
     }
   },
-  askDeleteGame: el => openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda e, se tinha placar, as cartas voltam a ficar como se ele não tivesse acontecido.', ok: 'Apagar jogo', danger: true, run: () => { delete S.games[el.dataset.id]; persist('games', el.dataset.id); S.ui.gameId = null; closeSheet(); render(); toast('Jogo apagado.'); } }),
+  askDeleteGame: el => canEditGame(S.games[el.dataset.id]) && openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda e, se tinha placar, as cartas voltam a ficar como se ele não tivesse acontecido.', ok: 'Apagar jogo', danger: true, run: () => { delete S.games[el.dataset.id]; persist('games', el.dataset.id); S.ui.gameId = null; closeSheet(); render(); toast('Jogo apagado.'); } }),
   confirmOk: () => { const s = S.ui.sheet; if (s && s.run) s.run(); },
   togglePres: el => {
     const g = curGame(), id = el.dataset.pid;
     if (!g) return;
+    if (FBM()) { if (canEditGame(g) || id === meId()) presenceSet(g, id, !g.conf.includes(id)); return; }
     if (g.conf.includes(id)) { g.conf = g.conf.filter(x => x !== id); g.paid = g.paid.filter(x => x !== id); }
     else g.conf.push(id);
     persist('games', g.id); render();
   },
-  togglePaid: el => { const g = curGame(), id = el.dataset.pid; if (!g) return; g.paid = g.paid.includes(id) ? g.paid.filter(x => x !== id) : g.paid.concat(id); persist('games', g.id); render(); },
+  heroPres: el => { const g = S.games[el.dataset.id]; if (!g || !FB() || !S.players[meId()]) return; const on = !g.conf.includes(meId()); presenceSet(g, meId(), on); toast(on ? 'Presença confirmada.' : 'Presença desmarcada.'); },
+  togglePaid: el => { const g = curGame(), id = el.dataset.pid; if (!g || !canEditGame(g)) return; g.paid = g.paid.includes(id) ? g.paid.filter(x => x !== id) : g.paid.concat(id); persist('games', g.id); render(); },
   copyInvite: () => { const g = curGame(); if (g) copyText(inviteText(g)); },
   pasteList: () => { S.ui.paste = null; openSheet({ type: 'paste' }); setTimeout(() => { const t = $('#pasteArea'); if (t) t.focus(); }, 60); },
   parseList: () => {
@@ -1854,21 +2096,24 @@ const ACT = {
   applyList: () => {
     const g = curGame(), r = S.ui.paste;
     if (!g || !r || !r.matched.length) return;
+    if (!canEditGame(g)) return;
     const rest = g.conf.filter(id => !r.matched.includes(id));
     g.conf = r.matched.concat(rest);
-    persist('games', g.id); S.ui.paste = null; closeSheet(); render();
+    if (FBM()) { dirty(); S.db.setConf(g.id, g.conf).catch(() => { toast('Não consegui salvar a lista.'); resync(); }); }
+    else persist('games', g.id);
+    S.ui.paste = null; closeSheet(); render();
     toast(`${plural(r.matched.length, 'confirmado', 'confirmados')} pela lista, na ordem do grupo.`);
   },
   copyTeams: () => { const g = curGame(); if (g && g.teams) copyText(teamsText(g)); },
   copyResult: () => { const g = curGame(); if (g) copyText(resultText(g)); },
   nTeams: el => {
-    const g = curGame(); const n = Number(el.dataset.n);
+    const g = curGame(); if (!canEditGame(g)) return; const n = Number(el.dataset.n);
     if (!g || g.nTeams === n) return;
     if (g.sets.length) return toast('Apague os sets do placar antes de mudar o número de times.');
     g.nTeams = n; g.teams = null; S.ui.swapSel = null; persist('games', g.id); render();
   },
   draw: () => {
-    const g = curGame(); if (!g) return;
+    const g = curGame(); if (!canEditGame(g)) return; if (!g) return;
     if (g.sets.length) return toast('Já tem set no placar. Apague os sets para sortear de novo.');
     const ids = playingIds(g), T = g.nTeams;
     if (ids.length < T * 2) return toast(`Precisa de pelo menos ${T * 2} confirmados para ${T} times.`);
@@ -1879,7 +2124,7 @@ const ACT = {
     toast(r.options > 1 ? `Escolhi uma entre ${r.options} divisões bem equilibradas.` : 'Times sorteados.');
   },
   swapPick: el => {
-    const g = curGame(), id = el.dataset.pid;
+    const g = curGame(); if (!canEditGame(g)) return; const id = el.dataset.pid;
     if (!g || !g.teams) return;
     if (g.sets.length) return toast('Com sets no placar, os times ficam travados.');
     const a = S.ui.swapSel;
@@ -1892,7 +2137,7 @@ const ACT = {
     toast(`Trocou ${nameOf(a)} com ${nameOf(id)}.`);
   },
   lateJoin: el => {
-    const g = curGame(), pid = el.dataset.pid, t = Number(el.dataset.team);
+    const g = curGame(); if (!canEditGame(g)) return; const pid = el.dataset.pid, t = Number(el.dataset.team);
     if (!g || !g.teams || !g.teams[t] || teamIds(g).includes(pid) || !P(pid)) return;
     g.teams[t].push(pid);
     if (g.sets.length) g.join[pid] = g.sets.length; else delete g.join[pid];
@@ -1900,7 +2145,7 @@ const ACT = {
     toast(g.sets.length ? `${nameOf(pid)} entrou no ${TEAMS[t].name.toLowerCase()} a partir do set ${g.sets.length + 1}.` : `${nameOf(pid)} entrou no ${TEAMS[t].name.toLowerCase()}.`);
   },
   leaveAsk: el => {
-    const g = curGame(), pid = el.dataset.pid;
+    const g = curGame(); if (!canEditGame(g)) return; const pid = el.dataset.pid;
     if (!g || !P(pid)) return;
     const back = g.leave[pid] != null, gid = g.id;
     openSheet({ type: 'confirm', title: back ? `${nameOf(pid)} voltou?` : `${nameOf(pid)} foi embora?`,
@@ -1909,7 +2154,7 @@ const ACT = {
       run: () => { const gg = S.games[gid]; if (!gg) return closeSheet(); if (back) delete gg.leave[pid]; else gg.leave[pid] = gg.sets.length; persist('games', gid); closeSheet(); render(); } });
   },
   track: el => {
-    const g = curGame(), a = el.dataset.attr; if (!g) return;
+    const g = curGame(); if (!canEditGame(g)) return; const a = el.dataset.attr; if (!g) return;
     const off = g.track.includes(a);
     g.track = off ? g.track.filter(x => x !== a) : ATTRS.filter(x => x === a || g.track.includes(x));
     const logged = g.log.filter(ev => EVENTS[ev.e].attr === a).length;
@@ -1918,15 +2163,15 @@ const ACT = {
   },
   selP: el => { S.ui.selP = el.dataset.pid; S.ui.flash = ''; render(); },
   ev: el => {
-    const g = curGame(), pid = S.ui.selP, e = el.dataset.e;
+    const g = curGame(); if (!canEditGame(g)) return; const pid = S.ui.selP, e = el.dataset.e;
     if (!g || !pid || !EVENTS[e]) return;
     g.log.push({ p: pid, e, t: Date.now() });
     S.ui.flash = `${EVENTS[e].label}: ${nameOf(pid)}`;
     persist('games', g.id, 700); render();
   },
-  undoEv: () => { const g = curGame(); if (!g || !g.log.length) return; const l = g.log.pop(); S.ui.flash = `Desfeito: ${EVENTS[l.e].label.toLowerCase()} de ${nameOf(l.p)}`; persist('games', g.id, 300); render(); },
-  addSet: () => { const g = curGame(); if (!g || !g.teams) return; const prev = g.sets[g.sets.length - 1]; g.sets.push({ a: prev ? prev.a : 0, b: prev ? prev.b : 1, pa: null, pb: null }); persist('games', g.id); render(); const ins = document.querySelectorAll('.score'); if (ins.length >= 2) ins[ins.length - 2].focus(); },
-  delSet: el => { const g = curGame(); if (!g) return; g.sets.splice(Number(el.dataset.i), 1); persist('games', g.id); render(); },
+  undoEv: () => { const g = curGame(); if (!canEditGame(g)) return; if (!g || !g.log.length) return; const l = g.log.pop(); S.ui.flash = `Desfeito: ${EVENTS[l.e].label.toLowerCase()} de ${nameOf(l.p)}`; persist('games', g.id, 300); render(); },
+  addSet: () => { const g = curGame(); if (!canEditGame(g)) return; if (!g || !g.teams) return; const prev = g.sets[g.sets.length - 1]; g.sets.push({ a: prev ? prev.a : 0, b: prev ? prev.b : 1, pa: null, pb: null }); persist('games', g.id); render(); const ins = document.querySelectorAll('.score'); if (ins.length >= 2) ins[ins.length - 2].focus(); },
+  delSet: el => { const g = curGame(); if (!canEditGame(g)) return; if (!g) return; g.sets.splice(Number(el.dataset.i), 1); persist('games', g.id); render(); },
   preview: () => {
     const g = curGame(); if (!g) return;
     if (!g.teams) return toast('Monte os times antes de encerrar.');
@@ -1936,7 +2181,7 @@ const ACT = {
   repToggle: el => { const id = el.dataset.pid; S.ui.openRep = S.ui.openRep === id ? null : id; if (el.dataset.ctx === 'preview') renderSheet(); else render(); },
   closeGame: () => {
     const g = S.games[S.ui.sheet && S.ui.sheet.gameId];
-    if (!g) return closeSheet();
+    if (!g || !canEditGame(g)) return closeSheet();
     g.status = 'encerrado'; g.finishedAt = Date.now();
     persist('games', g.id);
     const res = resultOf(g);
@@ -1944,7 +2189,7 @@ const ACT = {
     toast(res && res.mvp && P(res.mvp) ? `Jogo encerrado. MVP: ${nameOf(res.mvp)}.` : 'Jogo encerrado.');
   },
   reopen: () => {
-    const g = curGame(); if (!g) return;
+    const g = curGame(); if (!canEditGame(g)) return; if (!g) return;
     g.status = 'agendado'; g.finishedAt = 0;
     persist('games', g.id); S.ui.step = 'placar'; render(); window.scrollTo(0, 0);
     toast('Jogo reaberto. As cartas acompanham o que você corrigir.');
@@ -1955,16 +2200,36 @@ const ACT = {
     while (date < todayStr()) date = addDays(date, 7);
     const exists = Object.values(S.games).find(x => x.date === date && x.time === g.time && x.status !== 'encerrado');
     if (exists) { S.ui.gameId = exists.id; S.ui.step = null; render(); return toast('Esse jogo já estava marcado.'); }
-    const n = cleanGame(uid('g'), { date, time: g.time, place: g.place, max: g.max, note: g.note, track: g.track, nTeams: g.nTeams, created: Date.now() });
+    if (!canCreate()) return;
+    const n = cleanGame(uid('g'), { date, time: g.time, place: g.place, max: g.max, note: g.note, track: g.track, nTeams: g.nTeams, created: Date.now(), createdBy: meId() });
     S.games[n.id] = n; persist('games', n.id);
     S.ui.gameId = n.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0); toast(`Marcado para ${fmtDay(date).toLowerCase()}.`);
   },
   newPlayer: el => {
-    S.ui.form = { pid: null, pos: 'cor', pos2: [], level: 'exp', at: presetAt('exp', 'cor'), preset: true, photo: '', forGame: el && el.dataset.forgame ? S.ui.gameId : null };
+    if (FBM()) return ACT.newGuest(el);
+    S.ui.form = { pid: null, kind: 'player', notes: 'base', max: 90, pos: 'cor', pos2: [], level: 'exp', at: presetAt('exp', 'cor'), preset: true, photo: '', forGame: el && el.dataset.forgame ? S.ui.gameId : null };
+    openSheet({ type: 'playerForm' });
+  },
+  newSelf: () => {
+    if (!FB() || S.players[meId()]) return;
+    S.ui.form = { pid: null, kind: 'self', notes: 'base', max: 80, pos: 'cor', pos2: [], level: 'exp', at: presetAt('exp', 'cor', 80), preset: true, photo: '', forGame: null };
+    openSheet({ type: 'playerForm' });
+  },
+  newGuest: el => {
+    if (!canCreate()) return;
+    const forGame = el && el.dataset && el.dataset.forgame ? S.ui.gameId : null;
+    if (forGame && !canEditGame(S.games[forGame])) return;
+    S.ui.form = { pid: null, kind: 'guest', notes: 'base', max: 90, pos: 'cor', pos2: [], level: 'exp', at: presetAt('exp', 'cor'), preset: true, photo: '', forGame };
     openSheet({ type: 'playerForm' });
   },
   openPlayer: el => openSheet({ type: 'player', pid: el.dataset.pid }),
-  editPlayer: el => { const p = P(el.dataset.pid); if (!p) return; S.ui.form = { pid: p.id, pos: p.pos, pos2: (p.pos2 || []).slice(), level: p.level, at: { ...p.at }, start: { ...p.at }, photo: p.photo }; openSheet({ type: 'playerForm' }); },
+  editPlayer: el => {
+    const p = P(el.dataset.pid); if (!p || !canEditPlayer(p)) return;
+    const self = FBM() && p.id === meId();
+    const notes = !FBM() || p.guest ? 'adj' : (p.n ? 'locked' : 'base');
+    S.ui.form = { pid: p.id, kind: self ? 'self' : (p.guest ? 'guest' : 'player'), notes, max: notes === 'base' ? 80 : 99, pos: p.pos, pos2: (p.pos2 || []).slice(), level: p.level, at: { ...p.at }, start: { ...p.at }, photo: p.photo };
+    openSheet({ type: 'playerForm' });
+  },
   nudge: el => {
     const held = HOLD && HOLD.b === el && HOLD.fired;
     HOLD = null;
@@ -1974,7 +2239,7 @@ const ACT = {
     const f = S.ui.form; if (!f) return;
     f.pos = el.dataset.pos;
     f.pos2 = f.pos2.filter(x => x !== f.pos);
-    if (!f.pid && f.preset) f.at = presetAt(f.level, f.pos);
+    if (!f.pid && f.preset) f.at = presetAt(f.level, f.pos, f.max || 90);
     keepFormInputs(() => renderSheet());
   },
   formPos2: el => {
@@ -1986,7 +2251,7 @@ const ACT = {
   },
   formLevel: el => {
     const f = S.ui.form; if (!f || f.pid) return;
-    f.level = el.dataset.level; f.at = presetAt(f.level, f.pos); f.preset = true;
+    f.level = el.dataset.level; f.at = presetAt(f.level, f.pos, f.max || 90); f.preset = true;
     keepFormInputs(() => renderSheet());
   },
   pickPhoto: () => { const i = $('#photoInput'); i.value = ''; i.click(); },
@@ -1997,29 +2262,44 @@ const ACT = {
     if (!name) { $('#pErr').textContent = 'Escreva o nome do jogador.'; $('#pName').focus(); return; }
     const bad = document.querySelector('.rng-num.bad');
     if (bad) { $('#pErr').textContent = 'Tem nota fora da faixa permitida. Corrija o número em vermelho.'; bad.focus(); return; }
+    const cap = f.max || 90;
     if (f.pid && RAW(f.pid)) {
       const raw = RAW(f.pid);
+      if (!canEditPlayer(P(f.pid))) return closeSheet();
       Object.assign(raw, { name, nick, pos: f.pos, pos2: f.pos2.slice(), photo: f.photo, updated: Date.now() });
-      const changed = {};
-      for (const a of ATTRS) if (Math.abs(f.at[a] - f.start[a]) > 1e-9) changed[a] = clamp(Math.round(f.at[a]), 40, 99);
-      if (Object.keys(changed).length) raw.adj = (raw.adj || []).concat([{ t: adjTime(), at: changed }]);
-      persist('players', raw.id); closeSheet(); render(); toast('Jogador salvo.');
+      if (f.notes === 'base') { const at = {}; for (const a of ATTRS) at[a] = clamp(Math.round(f.at[a]), 40, cap); raw.base = { at, forma: null }; }
+      else if (f.notes === 'adj') {
+        const changed = {};
+        for (const a of ATTRS) if (Math.abs(f.at[a] - f.start[a]) > 1e-9) changed[a] = clamp(Math.round(f.at[a]), 40, 99);
+        if (Object.keys(changed).length) raw.adj = (raw.adj || []).concat([{ t: adjTime(), at: changed }]);
+      }
+      persist('players', raw.id); closeSheet(); render(); toast(f.kind === 'self' ? 'Sua carta foi salva.' : 'Jogador salvo.');
       return;
     }
-    const at = {}; for (const a of ATTRS) at[a] = clamp(Math.round(f.at[a]), 40, 90);
-    const p = cleanPlayer(uid('p'), { name, nick, pos: f.pos, pos2: f.pos2, level: f.level, photo: f.photo, base: { at }, adj: [], created: Date.now(), updated: Date.now() });
+    const at = {}; for (const a of ATTRS) at[a] = clamp(Math.round(f.at[a]), 40, cap);
+    const id = f.kind === 'self' ? meId() : f.kind === 'guest' ? 'g_' + uid('') : uid('p');
+    if (!id || (f.kind === 'self' && S.players[id])) return closeSheet();
+    const who = FBM() ? { ownerUid: f.kind === 'self' ? meId() : null, guest: f.kind === 'guest', createdBy: meId() } : {};
+    const p = cleanPlayer(id, Object.assign({ name, nick, pos: f.pos, pos2: f.pos2, level: f.level, photo: f.photo, base: { at }, adj: [], created: Date.now(), updated: Date.now() }, who));
     S.players[p.id] = p; persist('players', p.id);
     const gid = f.forGame;
-    if (gid && S.games[gid] && S.games[gid].status !== 'encerrado') { S.games[gid].conf.push(p.id); persist('games', gid); }
-    closeSheet(); render(); toast(`Carta de ${p.nick || p.name} criada: ${ovrOf(P(p.id))}.`);
+    if (gid && S.games[gid] && S.games[gid].status !== 'encerrado') {
+      if (FBM()) presenceSet(S.games[gid], p.id, true);
+      else { S.games[gid].conf.push(p.id); persist('games', gid); }
+    }
+    closeSheet(); render();
+    toast(f.kind === 'self' ? `Sua carta está no elenco: ${ovrOf(P(p.id))}.` : `Carta de ${p.nick || p.name} criada: ${ovrOf(P(p.id))}.`);
   },
   askDeletePlayer: el => {
     const id = el.dataset.pid;
+    if (!canEditPlayer(P(id)) || (FBM() && !(P(id) || {}).guest)) return;
     openSheet({ type: 'confirm', title: 'Apagar jogador?', text: `${nameOf(id)} sai do elenco e das listas de presença dos próximos jogos. Os jogos com placar continuam valendo para os outros.`, ok: 'Apagar jogador', danger: true, run: () => {
       delete S.players[id]; persist('players', id);
       for (const g of Object.values(S.games)) {
         if (g.status === 'encerrado') continue;
-        if (g.conf.includes(id) || g.paid.includes(id)) { g.conf = g.conf.filter(x => x !== id); g.paid = g.paid.filter(x => x !== id); persist('games', g.id); }
+        if (!(g.conf.includes(id) || g.paid.includes(id))) continue;
+        if (FBM()) { if (canEditGame(g)) { g.paid = g.paid.filter(x => x !== id); presenceSet(g, id, false); } continue; }
+        g.conf = g.conf.filter(x => x !== id); g.paid = g.paid.filter(x => x !== id); persist('games', g.id);
       }
       closeSheet(); render(); toast('Jogador apagado.');
     } });
@@ -2027,7 +2307,7 @@ const ACT = {
 };
 const CHG = {
   score: el => {
-    const g = curGame(); if (!g) return;
+    const g = curGame(); if (!g || !canEditGame(g)) return;
     const i = Number(el.dataset.i), f = el.dataset.f;
     if (!g.sets[i]) return;
     const v = el.value === '' ? null : clamp(parseInt(el.value, 10) || 0, 0, 99);
@@ -2037,7 +2317,7 @@ const CHG = {
     const tot = $('#setTotal'); if (tot) tot.textContent = scoreline(g) || '';
   },
   setTeam: el => {
-    const g = curGame(); if (!g) return;
+    const g = curGame(); if (!g || !canEditGame(g)) return;
     const i = Number(el.dataset.i), f = el.dataset.f, v = Number(el.value);
     const s = g.sets[i]; if (!s) return;
     const other = f === 'a' ? 'b' : 'a';
@@ -2052,7 +2332,7 @@ function numCheck(el, leaving) {
   if (raw !== el.value) el.value = raw;
   const v = raw === '' ? NaN : Number(raw);
   let msg = '';
-  if (!Number.isNaN(v) && v > max) msg = max === 90 ? 'No cadastro o máximo é 90. Acima disso, só jogando.' : 'O máximo é 99.';
+  if (!Number.isNaN(v) && v > max) msg = max === 80 ? 'Na sua própria carta o máximo é 80. Acima disso, só jogando.' : max === 90 ? 'No cadastro o máximo é 90. Acima disso, só jogando.' : 'O máximo é 99.';
   else if ((raw.length === 2 || (leaving && raw !== '')) && v < 40) msg = 'O mínimo é 40.';
   el.classList.toggle('bad', !!msg);
   const er = $('#e_' + a); if (er) er.textContent = msg;
@@ -2100,6 +2380,85 @@ boot();
 if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top === window) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 }
+</script>
+<script type="module">
+// Manchete: ponte com o Firebase (login por e-mail e senha + banco Firestore)
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, collection, setDoc, getDoc, deleteDoc, updateDoc, onSnapshot, writeBatch, arrayUnion, arrayRemove } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+const app = initializeApp(window.MANCHETE_FIREBASE);
+const auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
+let fs;
+try { fs = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() }) }); }
+catch (e) { fs = initializeFirestore(app, {}); }
+
+const userOf = u => u ? { uid: u.uid, email: u.email || '', name: u.displayName || (u.email || '').split('@')[0] } : null;
+const fail = e => { const x = new Error((e && e.message) || 'erro'); x.code = (e && e.code) || 'unknown'; return x; };
+const wrap = s => ({ docs: s.docs.map(d => ({ id: d.id, exists: true, data: () => d.data() })), size: s.size, empty: s.empty, metadata: { fromCache: s.metadata.fromCache, hasPendingWrites: s.metadata.hasPendingWrites } });
+const code = () => { const a = new Uint8Array(10); crypto.getRandomValues(a); return Array.from(a, x => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join(''); };
+const guard = p => p.catch(e => { throw fail(e); });
+
+window.MCloud = {
+  onAuth: cb => onAuthStateChanged(auth, u => cb(userOf(u))),
+  async signUp(name, email, pass) {
+    try {
+      const c = await createUserWithEmailAndPassword(auth, email, pass);
+      await updateProfile(c.user, { displayName: name });
+      await setDoc(doc(fs, 'users', c.user.uid), { name }, { merge: true });
+      return { uid: c.user.uid, email, name };
+    } catch (e) { throw fail(e); }
+  },
+  signIn: (email, pass) => guard(signInWithEmailAndPassword(auth, email, pass).then(c => userOf(c.user))),
+  resetPassword: email => guard(sendPasswordResetEmail(auth, email)),
+  signOut: () => guard(signOut(auth)),
+  getUser: uid => guard(getDoc(doc(fs, 'users', uid)).then(s => (s.exists() ? s.data() : null))),
+  setUser: (uid, data) => guard(setDoc(doc(fs, 'users', uid), data, { merge: true })),
+  async createTurma(name, me) {
+    const ref = doc(collection(fs, 'turmas'));
+    const c = code();
+    const b = writeBatch(fs);
+    b.set(ref, { name, ownerUid: me.uid, admins: [me.uid], inviteCode: c, created: Date.now() });
+    b.set(doc(fs, 'turmas', ref.id, 'membros', me.uid), { uid: me.uid, name: me.name, joinedAt: Date.now(), code: c });
+    b.set(doc(fs, 'users', me.uid), { lastTurma: ref.id, turmas: arrayUnion(ref.id) }, { merge: true });
+    await guard(b.commit());
+    return { id: ref.id, inviteCode: c };
+  },
+  async joinTurma(t, c, me) {
+    const mref = doc(fs, 'turmas', t, 'membros', me.uid);
+    let already = false;
+    try { already = (await getDoc(mref)).exists(); } catch (e) { already = false; }
+    if (!already) await guard(setDoc(mref, { uid: me.uid, name: me.name, joinedAt: Date.now(), code: c }));
+    await guard(setDoc(doc(fs, 'users', me.uid), { lastTurma: t, turmas: arrayUnion(t) }, { merge: true }));
+  },
+  leaveTurma: (t, uid) => guard(deleteDoc(doc(fs, 'turmas', t, 'membros', uid))),
+  removeMember: (t, uid) => guard(deleteDoc(doc(fs, 'turmas', t, 'membros', uid))),
+  async newInvite(t) { const c = code(); await guard(updateDoc(doc(fs, 'turmas', t), { inviteCode: c })); return c; },
+  watchTurma: (t, next, error) => onSnapshot(doc(fs, 'turmas', t), s => next(s.exists() ? { id: s.id, ...s.data() } : null), e => error && error(fail(e))),
+  watchMembers: (t, next, error) => onSnapshot(collection(fs, 'turmas', t, 'membros'), s => next(s.docs.map(d => d.data())), e => error && error(fail(e))),
+  db(t) {
+    return {
+      collection: kind => ({ onSnapshot: (next, error) => onSnapshot(collection(fs, 'turmas', t, kind), s => next(wrap(s)), e => error && error(fail(e))) }),
+      doc: path => {
+        const [kind, id] = path.split('/');
+        const ref = doc(fs, 'turmas', t, kind, id);
+        return {
+          // Partida: a presença (conf) nunca é sobrescrita aqui, só muda por presence/setConf.
+          set: data => {
+            if (kind !== 'games') return guard(setDoc(ref, data));
+            const d = { ...data }; delete d.conf;
+            return guard(setDoc(ref, d, { mergeFields: Object.keys(d) }));
+          },
+          delete: () => guard(deleteDoc(ref))
+        };
+      },
+      presence: (gid, pid, on) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { conf: on ? arrayUnion(pid) : arrayRemove(pid) })),
+      setConf: (gid, conf) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { conf }))
+    };
+  }
+};
+window.dispatchEvent(new Event('mcloud-ready'));
+
 </script>
 </body>
 </html>
