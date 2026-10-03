@@ -68,6 +68,7 @@ img{max-width:100%}
 
 /* Abas */
 .tabs{position:fixed; left:0; right:0; bottom:0; z-index:30; background:var(--surface); border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom,0px)}
+.tabs::after{content:""; position:absolute; left:0; right:0; top:100%; height:160px; background:var(--surface); pointer-events:none}
 .tabs-in{max-width:560px; margin:0 auto; display:grid; grid-template-columns:repeat(3,1fr)}
 .tab{display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 0 9px; font-size:12px; font-weight:600; color:var(--muted)}
 .tab svg{width:24px; height:24px}
@@ -274,7 +275,7 @@ td .num{font-size:18px}
 
 /* Folha (sheet) */
 .sheet-bg{position:fixed; inset:0; z-index:50; background:rgba(4,12,26,.55); display:flex; align-items:flex-end; justify-content:center}
-.sheet{overflow-x:hidden; width:100%; max-width:560px; max-height:calc(100% - 24px - env(safe-area-inset-top,0px)); overflow-y:auto; background:var(--bg); border-radius:20px 20px 0 0; padding:8px 16px calc(20px + env(safe-area-inset-bottom,0px))}
+.sheet{box-shadow:0 240px 0 0 var(--bg); overflow-x:hidden; width:100%; max-width:560px; max-height:calc(100% - 24px - env(safe-area-inset-top,0px)); overflow-y:auto; background:var(--bg); border-radius:20px 20px 0 0; padding:8px 16px calc(20px + env(safe-area-inset-bottom,0px))}
 .sheet-grab{width:40px; height:5px; border-radius:3px; background:var(--line-strong); margin:4px auto 10px}
 .sheet-head{display:flex; align-items:center; gap:10px; margin-bottom:12px}
 .sheet-title{font-family:var(--display); font-weight:800; font-size:28px; line-height:1.05; flex:1}
@@ -365,6 +366,7 @@ html::after{content:""; position:fixed; left:0; right:0; top:0; height:env(safe-
 <nav class="tabs" aria-label="Seções"><div class="tabs-in" id="tabs"></div></nav>
 <div id="sheet"></div>
 <div id="zoom"></div>
+<div id="vhProbe" aria-hidden="true" style="position:fixed;left:0;top:0;width:1px;height:100vh;visibility:hidden;pointer-events:none"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="photoInput" accept="image/*" class="sr" tabindex="-1" aria-hidden="true">
 <input type="file" id="backupInput" accept="application/json,.json" class="sr" tabindex="-1" aria-hidden="true">
@@ -984,7 +986,27 @@ function flushAll() {
   if (localTimer) saveLocalNow();
   for (const [key, st] of Object.entries(PEND)) if (st.timer && st.dirty && !st.saving) { clearTimeout(st.timer); flush(key); }
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAll(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAll(); else setTimeout(healViewport, 200); });
+// iPhone (app na Tela de Início): depois que o teclado abre, o iOS pode encolher a tela do app e deixar uma faixa
+// vazia embaixo. Ligar e desligar um elemento da altura da tela, sem pintar no meio, faz ele medir de novo.
+let MAX_VH = window.innerHeight;
+window.addEventListener('resize', () => { MAX_VH = Math.max(MAX_VH, window.innerHeight); });
+window.addEventListener('orientationchange', () => { MAX_VH = 0; setTimeout(() => { MAX_VH = window.innerHeight; }, 400); });
+function healViewport() {
+  if (MAX_VH - window.innerHeight <= 4) return;
+  const a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+  const y = window.scrollY;
+  for (const el of [$('#vhProbe'), document.querySelector('.tabs'), $('#view')]) {
+    if (!el) continue;
+    const d = el.style.display;
+    el.style.display = 'none'; void el.offsetHeight; el.style.display = d;
+  }
+  window.scrollTo(0, y);
+}
+document.addEventListener('focusout', e => {
+  if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) { setTimeout(healViewport, 160); setTimeout(healViewport, 600); }
+});
 window.addEventListener('pagehide', flushAll);
 function readLocal() {
   try {
@@ -2173,7 +2195,7 @@ function keepFormInputs(fn) {
 
 // ---------- Ações ----------
 const ACT = {
-  tab: el => { S.ui.tab = el.dataset.tab; S.ui.gameId = null; render(); window.scrollTo(0, 0); },
+  tab: el => { S.ui.tab = el.dataset.tab; S.ui.gameId = null; render(); window.scrollTo(0, 0); setTimeout(healViewport, 50); },
   home: () => { S.ui.gameId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
   help: () => openSheet({ type: 'help' }),
   closeSheet: () => closeSheet(),
