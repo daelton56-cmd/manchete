@@ -293,6 +293,7 @@ td .num{font-size:18px}
 .card-add svg{width:max(12px, 6cqw); height:max(12px, 6cqw)}
 .card-add.sent{background:rgba(30,42,58,.10); color:#1E2A3A; box-shadow:inset 0 0 0 1px rgba(30,42,58,.4)}
 .chip-sep{flex:0 0 1px; width:1px; height:26px; background:var(--line-strong); margin:0 2px}
+.link-btn{padding:0; color:var(--ink); font-weight:700; text-decoration:underline; text-underline-offset:2px; font-size:inherit}
 .turma-switch{display:inline-flex; align-items:center; gap:6px; padding:0; color:var(--ink)}
 .turma-switch svg{width:22px; height:22px; margin-top:2px}
 .search-box{position:relative; margin:14px 0 6px}
@@ -1197,10 +1198,11 @@ function parseInvite(text) {
   const m = String(text || '').match(/[?&]t=([\w-]{6,40}).*?[?&]c=([\w-]{4,40})/) || String(text || '').match(/[?&]c=([\w-]{4,40}).*?[?&]t=([\w-]{6,40})/);
   if (!m) return null;
   const t = /[?&]t=([\w-]+)/.exec(text)[1], c = /[?&]c=([\w-]+)/.exec(text)[1];
-  const n = /[?&]n=([^&#]*)/.exec(text), gm = /[?&]g=([\w-]{4,60})/.exec(text), bm = /[?&]by=([\w-]{6,60})/.exec(text);
-  let name = '';
+  const n = /[?&]n=([^&#]*)/.exec(text), gm = /[?&]g=([\w-]{4,60})/.exec(text), bm = /[?&]by=([\w-]{6,60})/.exec(text), dm = /[?&]de=([^&#]*)/.exec(text);
+  let name = '', de = '';
   try { name = n ? decodeURIComponent(n[1].replace(/\+/g, ' ')).slice(0, 40) : ''; } catch (e) { }
-  return { t, c, n: name, g: gm ? gm[1] : '', by: bm ? bm[1] : '' };
+  try { de = dm ? decodeURIComponent(dm[1].replace(/\+/g, ' ')).replace(/[<>"]/g, '').trim().slice(0, 24) : ''; } catch (e) { }
+  return { t, c, n: name, g: gm ? gm[1] : '', by: bm ? bm[1] : '', de };
 }
 function readInvite() {
   const fromUrl = parseInvite(location.search);
@@ -1211,7 +1213,8 @@ function clearInvite() { try { localStorage.removeItem(LS_INVITE); } catch (e) {
 function inviteLink(gid) {
   if (!S.turma) return '';
   const personal = S.myToken && meId();
-  return `${location.origin}${location.pathname}?t=${encodeURIComponent(S.turmaId)}&c=${encodeURIComponent(personal ? S.myToken : S.turma.inviteCode)}${personal ? '&by=' + encodeURIComponent(meId()) : ''}&n=${encodeURIComponent(S.turma.name || '')}${gid ? '&g=' + encodeURIComponent(gid) : ''}`;
+  const who = String((myBasic().nick || myBasic().name || '')).trim().split(/\s+/)[0].slice(0, 24);
+  return `${location.origin}${location.pathname}?t=${encodeURIComponent(S.turmaId)}&c=${encodeURIComponent(personal ? S.myToken : S.turma.inviteCode)}${personal ? '&by=' + encodeURIComponent(meId()) : ''}&n=${encodeURIComponent(S.turma.name || '')}${personal && who && who !== 'Jogador' ? '&de=' + encodeURIComponent(who) : ''}${gid ? '&g=' + encodeURIComponent(gid) : ''}`;
 }
 const standalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
 function stopListening() {
@@ -1494,9 +1497,9 @@ function authView() {
   const inv = S.invite;
   const isNew = S.authTab === 'criar';
   return `<section class="board" style="margin-top:20px">
-    <div class="board-label">${inv ? 'Você foi convidado' : 'Bem-vindo'}</div>
+    <div class="board-label">${inv ? (inv.de ? `${esc(inv.de)} te convidou para` : 'Você foi convidado para') : 'Bem-vindo'}</div>
     <div class="board-day" style="font-size:40px;margin:4px 0 6px">${inv && inv.n ? esc(inv.n) : 'Manchete'}</div>
-    <div class="board-place" style="margin:0">${inv ? 'Entre ou crie sua conta para ver as cartas da turma e criar a sua.' : 'As cartas, a agenda e a súmula do vôlei da galera.'}</div>
+    <div class="board-place" style="margin:0">${inv ? `Crie sua conta para entrar na turma${inv.de ? ` e já chegar como amigo de ${esc(inv.de)}` : ''}. Se você já tem conta, é só entrar.` : 'As cartas, a agenda e a súmula do vôlei da galera.'}</div>
   </section>
   ${!standalone() && /iPhone|iPad/.test(navigator.userAgent) ? `<div class="banner">No iPhone, toque em compartilhar e em <b>Adicionar à Tela de Início</b> antes de entrar. Depois abra pelo ícone.</div>` : ''}
   <div class="seg seg-full" role="group" aria-label="Entrar ou criar conta" style="margin:18px 0 14px;grid-template-columns:1fr 1fr">
@@ -1628,7 +1631,7 @@ function elencoSocial() {
   let h = banners();
   h += searchBoxHTML();
   if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${plural(friendIds().length, 'amigo', 'amigos')}</div></div></div>`;
-  if (!filter) { const sug = suggestions(); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
+  if (!filter) { const sug = suggestions().filter(c => !S.players[c.id]); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
   const cnt = coPlayers();
   let ids = filter === 'recentes' ? [...cnt.keys()] : filter === 'amigos' ? friendIds() : Object.keys(S.players);
   const ps = [...new Set(ids)].filter(id => id !== meId()).map(P).filter(Boolean);
@@ -1745,8 +1748,9 @@ function presencaStep(g, confN) {
   const row = (p, i, on) => `<div class="pres">
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
     <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
+    ${on && !W && FB() && privacyOn() && canFriend(p.id) && friendState(p.id) !== 'friend' ? friendBtn(p.id) : ''}
     ${on && W ? `<button class="paid" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(p.nick || p.name)} pagou">${g.paid.includes(p.id) ? 'Pagou' : 'Pagou?'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
-    ${W || (FB() && p.id === meId()) ? `<button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Vai' : (p.id === meId() ? 'Vou' : 'Confirmar')}</button>` : ''}
+    ${W || (FB() && p.id === meId()) ? `<button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? (p.id === meId() ? 'Desmarcar' : 'Vai') : (p.id === meId() ? 'Vou' : 'Confirmar')}</button>` : ''}
   </div>`;
   if (conf.length) h += listBox(conf.map((id, i) => row(P(id), i, true)));
   const shownOthers = W ? others : others.filter(p => p.id === meId() && canJoinGame(g));
@@ -2080,7 +2084,7 @@ function perfilHTML() {
     : `<div class="empty"><h3>Você ainda não tem carta</h3><p class="sub">Crie a sua para entrar no elenco e confirmar presença.</p><button class="btn btn-ball" data-act="newSelf">Criar minha carta</button></div>`;
   h += `<p class="sub small" style="text-align:center;margin-top:10px">Conectado como ${esc(S.me.name)}, ${esc(S.me.email)}.</p>`;
   h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">${esc(S.turma && S.turma.name ? S.turma.name : 'Turma')}</h2>${admin ? '<button class="btn btn-sm" data-act="renameTurma">Renomear</button>' : ''}</div>`;
-  h += `<div><div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link da turma</button>' : ''}${privacyOn() ? '<button class="btn btn-block btn-ghost" data-act="askNewMyLink">Trocar o meu link</button>' : ''}</div>${privacyOn() ? '<p class="sub small" style="margin-top:8px">Quem entra pelo seu link chega como seu amigo. Se o seu link vazar, troque: o antigo para de funcionar.</p>' : ''}<p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p></div>`;
+  h += `<div><div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link da turma</button>' : ''}</div>${privacyOn() ? '<p class="sub small" style="margin-top:8px">Quem entra pelo seu link chega na turma como seu amigo. <button class="link-btn" data-act="askNewMyLink">Trocar o meu link</button></p>' : ''}${privacyOn() ? '' : `<p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p>`}</div>`;
   h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, listBox(members.map(m => {
     const role = S.turma && S.turma.ownerUid === m.uid ? 'Criou a turma' : (S.turma && (S.turma.admins || []).includes(m.uid) ? 'Admin' : 'Membro');
     const canKick = admin && m.uid !== meId() && !(S.turma && S.turma.ownerUid === m.uid);
@@ -2586,9 +2590,9 @@ function runSearch() {
     S.ui.peopleHits = local.concat(remote); S.ui.peopleBusy = false; dirty(); box();
   })();
 }
-// Quem vai: antes do jogo, já dá para adicionar quem confirmou.
+// Quem vai: quem marcou a partida não tem o botão na linha, então para ele aparece separado.
 function whoGoingHTML(g) {
-  if (!FB() || !privacyOn() || hasResult(g)) return '';
+  if (!FB() || !privacyOn() || hasResult(g) || !canEditGame(g)) return '';
   const ids = g.conf.filter(id => id !== meId() && P(id) && canFriend(id) && friendState(id) !== 'friend');
   if (!ids.length) return '';
   return section('Quem vai e ainda não é seu amigo', listBox(ids.map(id => { const p = P(id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)}</div></div>${friendBtn(id)}</div>`; })));
