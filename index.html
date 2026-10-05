@@ -293,6 +293,8 @@ td .num{font-size:18px}
 .card-add svg{width:max(12px, 6cqw); height:max(12px, 6cqw)}
 .card-add.sent{background:rgba(30,42,58,.10); color:#1E2A3A; box-shadow:inset 0 0 0 1px rgba(30,42,58,.4)}
 .chip-sep{flex:0 0 1px; width:1px; height:26px; background:var(--line-strong); margin:0 2px}
+.turma-switch{display:inline-flex; align-items:center; gap:6px; padding:0; color:var(--ink)}
+.turma-switch svg{width:22px; height:22px; margin-top:2px}
 .search-box{position:relative; margin:14px 0 6px}
 .search-box .input{padding-left:42px}
 .search-ico{position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--muted); display:grid; pointer-events:none}
@@ -825,6 +827,7 @@ const ICON = {
   podium: svg('<path d="M3 20h18M5 20v-6h4v6M10 20V8h4v12M15 20v-9h4v9"/>'),
   back: svg('<path d="M15 18l-6-6 6-6"/>'),
   chev: svg('<path d="M9 6l6 6-6 6"/>'),
+  down: svg('<path d="M6 9l6 6 6-6"/>'),
   search: svg('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),
   bell: svg('<path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
   help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.2-1 .7-1 1.3v.6M12 17v.2"/>'),
@@ -851,7 +854,7 @@ const S = {
   ui: { tab: 'jogos', gameId: null, step: null, selP: null, swapSel: null, sort: 'ovr', rankSort: 'ovr', openRep: null, flash: '', sheet: null, form: null, pendingRender: false },
   migrateOffer: false,
   me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false,
-  friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
+  rawPersonal: new Set(), friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
 };
 const FBM = () => !!window.MANCHETE_FIREBASE;
 const FB = () => FBM() && S.mode === 'cloud' && !!S.me && !!S.turmaId;
@@ -1111,6 +1114,7 @@ function applySnapshot(kind, snap) {
   for (const doc of snap.docs) {
     const data = doc.data();
     if (data && typeof data === 'object') map[doc.id] = kind === 'players' ? cleanPlayer(doc.id, clone(data)) : cleanGame(doc.id, clone(data));
+    if (kind === 'players' && data && typeof data === 'object') { if (PERSONAL.some(f => f in data)) S.rawPersonal.add(doc.id); else S.rawPersonal.delete(doc.id); }
   }
   for (const key of Object.keys(PEND)) {
     const [k, id] = key.split('/');
@@ -1256,7 +1260,7 @@ function openTurma(t) {
     if (S.pendingAutoFriend) runAutoFriend();
     if (S.firmData) runPrivacyMigration();
   }, () => lostTurma()));
-  startSocial();
+  startSocial(); loadMyTurmas();
   S.unsubs.push(window.MCloud.watchMembers(t, list => { const m = {}; for (const x of list) if (x && x.uid) m[x.uid] = x; S.members = m; dirty(); render(); }, () => { }));
   subscribe();
   setTimeout(() => { if (S.mode === 'loading-cloud' && S.turmaId === t) { S.loadErr = true; render(); } }, 20000);
@@ -1267,6 +1271,8 @@ function loadMyTurmas() {
     S.myTurmas = (list || []).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
     if (S.ui.sheet && S.ui.sheet.type === 'perfil') renderSheet();
     if (S.mode === 'no-turma') render();
+    if (S.mode === 'cloud') render();
+    if (S.ui.sheet && S.ui.sheet.type === 'turmas') renderSheet();
   }).catch(() => { S.myTurmas = []; });
 }
 function lostTurma() {
@@ -1441,8 +1447,10 @@ function notifData() {
   return { act, news: top, unread: act.length + top.filter(n => n.t > seen).length, seen };
 }
 function renderNotifBadge() { if (FB()) renderTop(); }
+// Nome para as notificações: nunca "Jogador removido" para quem acabou de entrar.
+function personName(u) { const p = P(u); if (p && p.known !== false && p.name && p.name !== 'Jogador') return p.nick || p.name; const pi = personalOf(u); return pi && pi.name ? (pi.nick || pi.name) : ''; }
 function notifsHTML() {
-  const d = notifData(), fn = u => esc(nameOf(u));
+  const d = notifData(), fn = u => esc(personName(u) || 'Alguém novo');
   let h = '';
   const reqs = d.act.filter(a => a.kind === 'req'), todo = d.act.filter(a => a.kind !== 'req');
   if (reqs.length) h += section('Pedidos de amizade', listBox(reqs.map(a => { const p = P(a.uid) || cleanProfile({ name: a.f.fromName, photo: a.f.fromPhoto }); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc((p && (p.nick || p.name)) || a.f.fromName || 'Alguém')}</div><div class="item-sub">quer ser seu amigo</div></div><div class="row-wrap" style="gap:6px"><button class="btn btn-sm btn-ball" data-act="friendAccept" data-uid="${esc(a.uid)}">Aceitar</button><button class="btn btn-sm btn-ghost" data-act="friendCancel" data-uid="${esc(a.uid)}" aria-label="Recusar">${ICON.x}</button></div></div>`; })));
@@ -1451,9 +1459,9 @@ function notifsHTML() {
   if (sug.length) h += section('Sugestões para você', sugRow(sug));
   const text = n => {
     if (n.kind === 'acc') return `${fn(n.uid)} aceitou seu pedido de amizade.`;
-    if (n.kind === 'joined') return `${fn(n.uid)} entrou pelo seu convite e agora vocês são amigos.`;
+    if (n.kind === 'joined') return personName(n.uid) ? `${fn(n.uid)} entrou pelo seu convite. Vocês já são amigos.` : 'Alguém novo entrou pelo seu convite. Vocês já são amigos, e a carta aparece no Elenco quando a pessoa criar.';
     if (n.kind === 'invite') return `${fn(n.uid)} te convidou para uma partida privada, ${esc(fmtDay(n.g.date).toLowerCase())}.`;
-    if (n.kind === 'game') return `${P(n.uid) && P(n.uid).known ? fn(n.uid) + ' marcou' : 'Marcaram'} um jogo: ${esc(fmtDay(n.g.date).toLowerCase())}, ${esc(fmtTime(n.g.time))}.`;
+    if (n.kind === 'game') return `${personName(n.uid) ? fn(n.uid) + ' marcou' : 'Marcaram'} um jogo: ${esc(fmtDay(n.g.date).toLowerCase())}, ${esc(fmtTime(n.g.time))}.`;
     if (n.kind === 'mvp') return `Você foi o MVP da galera no jogo de ${esc(fmtDay(n.g.date).toLowerCase())}.`;
     return '';
   };
@@ -1613,25 +1621,30 @@ function whoPlayedHTML(g) {
   return section('Quem jogou', listBox(ids.map(id => { const p = P(id), ti = teamOfId(g, id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${p.guest ? 'Convidado' : esc((POS[p.pos] || POS.cor).name)}${ti >= 0 ? `, time ${TEAMS[ti].name.toLowerCase()}` : ''}</div></div>${friendBtn(id)}</div>`; })));
 }
 function elencoSocial() {
-  const recent = !!S.ui.elencoRecent, mine = P(meId());
+  const filter = S.ui.elencoFilter || '', mine = P(meId());
   let h = banners();
   h += `<div class="search-box" role="search"><span class="search-ico" aria-hidden="true">${ICON.search}</span><input class="input" id="peopleQ" data-input="peopleQ" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Buscar por nome, apelido ou e-mail" aria-label="Buscar pessoas por nome, apelido ou e-mail" value="${esc(S.ui.peopleQ || '')}"></div><div id="peopleRes" aria-live="polite">${peopleResHTML()}</div>`;
   if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${plural(friendIds().length, 'amigo', 'amigos')}</div></div></div>`;
-  if (!recent) { const sug = suggestions(); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
+  if (!filter) { const sug = suggestions(); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
   const cnt = coPlayers();
-  let ids = recent ? [...cnt.keys()] : [...friendIds(), ...Object.values(S.players).filter(p => p.guest && p.createdBy === meId()).map(p => p.id)];
+  let ids = filter === 'recentes' ? [...cnt.keys()] : filter === 'amigos' ? friendIds() : Object.keys(S.players);
   const ps = [...new Set(ids)].filter(id => id !== meId()).map(P).filter(Boolean);
   const sorters = { ovr: (x, y) => ovrOf(y) - ovrOf(x), nome: (x, y) => (x.nick || x.name).localeCompare(y.nick || y.name, 'pt-BR'), pos: (x, y) => Object.keys(POS).indexOf(x.pos) - Object.keys(POS).indexOf(y.pos) || ovrOf(y) - ovrOf(x) };
   ps.sort(sorters[S.ui.sort] || sorters.ovr);
+  const tname = (S.turma && S.turma.name) || 'Turma', many = (S.myTurmas || []).length > 1;
+  h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px">${many
+    ? `<button class="turma-switch" data-act="turmaMenu" aria-label="${esc(tname)}. Trocar de turma"><span class="h-sec" style="margin:0">${esc(tname)}</span>${ICON.down}</button>`
+    : `<h2 class="h-sec" style="margin:0">${esc(tname)}</h2>`}<span class="spacer"></span><span class="sub small">${plural(Object.keys(S.members).length, 'pessoa', 'pessoas')}</span></div>`;
   const chip = (k, l) => `<button class="chip" data-act="sort" data-sort="${k}" aria-pressed="${S.ui.sort === k}">${l}</button>`;
-  h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">A galera</h2></div>`;
-  h += `<div class="chips-line">${chip('ovr', 'Geral')}${chip('nome', 'Nome')}${chip('pos', 'Posição')}<span class="chip-sep" aria-hidden="true"></span><button class="chip" data-act="elencoRecent" aria-pressed="${recent}">Jogou comigo</button></div>`;
-  if (!ps.length) h += recent
-    ? `<div class="empty"><h3>Ninguém por aqui ainda</h3><p class="sub">Depois das próximas partidas, quem jogou com você aparece aqui com a carta e o botão Adicionar amigo.</p></div>`
-    : `<div class="empty"><h3>Você ainda não tem amigos aqui</h3><p class="sub">Toque em Jogou comigo para ver quem jogou com você e adicionar.</p></div>`;
-  else h += cardsGrid(ps, recent ? (p => `<div class="sub small" style="text-align:center">${cnt.get(p.id) === 1 ? '1 jogo juntos' : (cnt.get(p.id) || 0) + ' jogos juntos'}${isFriend(p.id) ? ', amigo' : ''}</div>`) : null, { addBar: recent });
-  h += `<p class="sub small" style="margin-top:14px">${recent ? 'Todo mundo que jogou com você nas suas últimas 10 partidas. Quem ainda não é seu amigo tem a faixa amarela na carta.' : 'Seus amigos nesta turma e os convidados que você criou. Quem entra pelo seu link já chega como seu amigo.'}</p>`;
-  if (!recent) {
+  const fchip = (k, l) => `<button class="chip" data-act="elencoFilter" data-v="${k}" aria-pressed="${filter === k}">${l}</button>`;
+  h += `<div class="chips-line">${chip('ovr', 'Geral')}${chip('nome', 'Nome')}${chip('pos', 'Posição')}<span class="chip-sep" aria-hidden="true"></span>${fchip('amigos', 'Amigos')}${fchip('recentes', 'Jogou comigo')}</div>`;
+  if (!ps.length) h += filter === 'recentes'
+    ? `<div class="empty"><h3>Ninguém por aqui ainda</h3><p class="sub">Depois das próximas partidas, quem jogou com você aparece aqui.</p></div>`
+    : filter === 'amigos' ? `<div class="empty"><h3>Nenhum amigo nesta turma ainda</h3><p class="sub">Toque na faixa amarela das cartas para adicionar quem você conhece.</p></div>`
+    : `<div class="empty"><h3>Só você por aqui</h3><p class="sub">Mande o seu link para a galera. Quem entrar já chega como seu amigo.</p></div>`;
+  else h += cardsGrid(ps, filter === 'recentes' ? (p => `<div class="sub small" style="text-align:center">${cnt.get(p.id) === 1 ? '1 jogo juntos' : (cnt.get(p.id) || 0) + ' jogos juntos'}</div>`) : null, { addBar: true });
+  h += `<p class="sub small" style="margin-top:14px">${filter === 'recentes' ? 'Quem jogou com você nas suas últimas 10 partidas.' : filter === 'amigos' ? 'Seus amigos nesta turma.' : 'Todo mundo desta turma. Quem ainda não é seu amigo tem a faixa amarela na carta para adicionar.'}</p>`;
+  if (filter !== 'recentes') {
     const outside = Object.entries(S.myMirrors).filter(([u]) => !S.players[u] && isFriend(u));
     if (outside.length) h += section('Amigos de outras turmas', listBox(outside.map(([u, x]) => `<div class="pres">${avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">Ainda não está nesta turma</div></div><button class="btn btn-sm" data-act="shareInvite">Chamar</button></div>`)));
   }
@@ -1659,9 +1672,9 @@ function elencoView() {
 
 function rankingView() {
   let ps = Object.keys(S.players).map(P);
-  const social = FB() && privacyOn(), scope = S.ui.rankScope || 'amigos';
-  if (social) {
-    const ids = scope === 'recentes' ? new Set([meId(), ...coPlayers().keys()]) : new Set([meId(), ...friendIds(), ...Object.values(S.players).filter(p => p.guest && p.createdBy === meId()).map(p => p.id)]);
+  const social = FB() && privacyOn(), scope = S.ui.rankScope || 'turma';
+  if (social && scope !== 'turma') {
+    const ids = scope === 'recentes' ? new Set([meId(), ...coPlayers().keys()]) : new Set([meId(), ...friendIds()]);
     ps = ps.filter(p => ids.has(p.id));
   }
   if (!ps.length) return banners() + `<div class="empty" style="margin-top:16px"><h3>Ranking vazio</h3><p class="sub">O ranking aparece quando o elenco tiver jogadores.</p></div>`;
@@ -1679,7 +1692,7 @@ function rankingView() {
     <td>${p.tot.sets ? Math.round(pct(p) * 100) + '%' : '–'}</td>
     <td>${galeraCol ? `<span class="num">${gm[p.id] || 0}</span>` : (p.tot.notaN ? fmtN(avg(p)) : '–')}</td>
   </tr>`).join('');
-  return banners() + (social ? `<div class="seg seg-full" style="grid-template-columns:1fr 1fr;margin-top:14px" role="group" aria-label="Quem entra no ranking"><button data-act="rankScope" data-v="amigos" aria-pressed="${scope === 'amigos'}">Amigos</button><button data-act="rankScope" data-v="recentes" aria-pressed="${scope === 'recentes'}">Jogou comigo</button></div>` : '') + `<div class="row-wrap" style="margin:16px 0 12px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Nota')}${chip('pres', 'Presença')}${FBM() ? chip('galera', 'MVP da galera') : ''}</div>
+  return banners() + (social ? `<div class="seg seg-full" style="grid-template-columns:1fr 1fr 1fr;margin-top:14px" role="group" aria-label="Quem entra no ranking"><button data-act="rankScope" data-v="turma" aria-pressed="${scope === 'turma'}">Turma</button><button data-act="rankScope" data-v="amigos" aria-pressed="${scope === 'amigos'}">Amigos</button><button data-act="rankScope" data-v="recentes" aria-pressed="${scope === 'recentes'}">Jogou comigo</button></div>` : '') + `<div class="row-wrap" style="margin:16px 0 12px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Nota')}${chip('pres', 'Presença')}${FBM() ? chip('galera', 'MVP da galera') : ''}</div>
   <div class="tbl-wrap"><table class="rank-tbl"><thead><tr><th>Jogador</th><th>Geral</th><th>Jogos</th><th>Vit.</th><th>${galeraCol ? 'MVPs' : 'Nota'}</th></tr></thead><tbody>${rows}</tbody></table></div>
   <p class="sub small" style="margin-top:10px">Vit. é a porcentagem de sets vencidos. ${galeraCol ? 'MVPs é quantas vezes a galera votou no jogador como melhor da partida.' : 'Nota é a média das notas de 0 a 10 dos jogos com placar.'}</p>`;
 }
@@ -1922,6 +1935,7 @@ function renderSheet() {
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
+  else if (s.type === 'turmas') { title = 'Suas turmas'; body = myTurmasList(S.turmaId) + `<div style="display:grid;gap:10px;margin-top:12px"><button class="btn btn-block" data-act="newTurma">${ICON.plus}Nova turma</button></div><p class="sub small" style="margin-top:10px">Cada turma é um vôlei com as próprias cartas, jogos e ranking.</p>`; }
   else if (s.type === 'unfriend') { const nm = nameOf(s.uid); title = 'Desfazer amizade'; body = `<p>${esc(nm)} sai da sua aba Amigos e você sai da dele. Se vocês jogaram juntos recentemente, continuam aparecendo em Jogou recentemente.</p><div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-danger" data-act="unfriend" data-uid="${esc(s.uid)}">Desfazer amizade</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Cancelar</button></div>`; }
   else if (s.type === 'turmaName') {
     title = s.mode === 'new' ? 'Nova turma' : 'Renomear turma';
@@ -2060,14 +2074,11 @@ function perfilHTML() {
   h += `<p class="sub small" style="text-align:center;margin-top:10px">Conectado como ${esc(S.me.name)}, ${esc(S.me.email)}.</p>`;
   h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">${esc(S.turma && S.turma.name ? S.turma.name : 'Turma')}</h2>${admin ? '<button class="btn btn-sm" data-act="renameTurma">Renomear</button>' : ''}</div>`;
   h += `<div><div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link da turma</button>' : ''}${privacyOn() ? '<button class="btn btn-block btn-ghost" data-act="askNewMyLink">Trocar o meu link</button>' : ''}</div>${privacyOn() ? '<p class="sub small" style="margin-top:8px">Quem entra pelo seu link chega como seu amigo. Se o seu link vazar, troque: o antigo para de funcionar.</p>' : ''}<p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p></div>`;
-  if (privacyOn() && !admin) {
-    const fr = members.filter(m => m.uid !== meId() && isFriend(m.uid));
-    h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, `<p class="sub" style="margin:-4px 0 10px">Você vê o nome só de quem é seu amigo.</p>` + (fr.length ? listBox(fr.map(m => `<div class="pres">${avatar(P(m.uid) || personalOf(m.uid) || { name: '?' })}<div class="item-main"><div class="item-title">${esc(nameOf(m.uid))}</div><div class="item-sub">Amigo</div></div></div>`)) : ''));
-  } else h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, listBox(members.map(m => {
+  h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, listBox(members.map(m => {
     const role = S.turma && S.turma.ownerUid === m.uid ? 'Criou a turma' : (S.turma && (S.turma.admins || []).includes(m.uid) ? 'Admin' : 'Membro');
     const canKick = admin && m.uid !== meId() && !(S.turma && S.turma.ownerUid === m.uid);
-    const nm = (P(m.uid) && P(m.uid).known) ? (P(m.uid).nick || P(m.uid).name) : ((personalOf(m.uid) || {}).name || m.name || 'Sem nome');
-    const by = m.by && m.by !== m.uid ? `, chamado por ${(P(m.by) && P(m.by).known) ? (P(m.by).nick || P(m.by).name) : ((personalOf(m.by) || {}).name || 'alguém')}` : '';
+    const nm = personName(m.uid) || m.name || 'Ainda sem carta';
+    const by = m.by && m.by !== m.uid ? `, chamado por ${personName(m.by) || 'alguém'}` : '';
     return `<div class="pres">${avatar(P(m.uid) || { name: nm })}<div class="item-main"><div class="item-title">${esc(nm)}${m.uid === meId() ? ' (você)' : ''}</div><div class="item-sub">${role}${P(m.uid) ? '' : ', ainda sem carta'}${esc(by)}</div></div>${canKick ? `<button class="btn btn-sm btn-danger" data-act="askRemoveMember" data-uid="${esc(m.uid)}">Tirar</button>` : ''}</div>`;
   })));
   h += section('Suas turmas', myTurmasList(S.turmaId) + `<div style="margin-top:10px"><button class="btn btn-block" data-act="newTurma">${ICON.plus}Nova turma</button></div>`);
@@ -2379,7 +2390,7 @@ function tourSlides() {
   return [
     { art: cardArt, title: 'Esta é a sua carta', text: 'O número grande é o seu geral, que junta seus fundamentos com a sua forma nos jogos. A cor mostra o nível, de bronze a lenda. Nos 5 primeiros jogos ela se ajusta mais rápido.' },
     { art: boardArt, title: 'Presença em um toque', text: 'O próximo jogo aparece no topo: é só tocar em Vou jogar. Se lotar, você entra na espera e é avisado quando abrir vaga. Quem marca a partida é quem cuida dela, e você também pode marcar as suas.' },
-    ...(privacyOn() ? [{ art: `<div class="tour-score" aria-hidden="true"><div class="tour-set"><span class="av">R</span><b style="font-size:18px">Rafa</b><span class="spacer"></span><span class="btn btn-sm">Adicionar</span></div><div class="tour-set"><span class="av">B</span><b style="font-size:18px">Bia</b><span class="spacer"></span><span class="pill pill-done">Amigos</span></div></div>`, title: 'Sua galera', text: 'Você entra como amigo de quem te convidou. Depois de cada jogo, toque em Jogou comigo, no Elenco: quem ainda não é seu amigo tem a faixa amarela na carta para adicionar. Nome e foto só os amigos veem.' }] : []),
+    ...(privacyOn() ? [{ art: `<div class="tour-score" aria-hidden="true"><div class="tour-set"><span class="av">R</span><b style="font-size:18px">Rafa</b><span class="spacer"></span><span class="btn btn-sm">Adicionar</span></div><div class="tour-set"><span class="av">B</span><b style="font-size:18px">Bia</b><span class="spacer"></span><span class="pill pill-done">Amigos</span></div></div>`, title: 'Sua galera', text: 'Você entra como amigo de quem te convidou. No Elenco aparece todo mundo da turma, e quem ainda não é seu amigo tem a faixa amarela na carta para adicionar. Quem é de fora da turma não vê nada.' }] : []),
     { art: scoreArt, title: 'O placar mexe nas cartas', text: 'Quando o placar é anotado, as cartas sobem ou descem na hora. Se quem marcou não for admin da turma, alguém do outro time confirma o placar antes de valer.' }
   ];
 }
@@ -2447,6 +2458,7 @@ function personalOf(id) {
   if (S.myMirrors[id]) return S.myMirrors[id];
   for (const list of Object.values(S.fofMirrors)) if (list && list[id]) return list[id];
   if (S.publicProfiles[id]) return S.publicProfiles[id];
+  if (S.members[id] && S.members[id].name) return cleanProfile({ name: S.members[id].name });
   for (const f of Object.values(S.friendships)) {
     if (!f.users || !f.users.includes(id)) continue;
     if (f.from === id && f.fromName) return cleanProfile({ name: f.fromName, nick: f.fromNick, photo: f.fromPhoto });
@@ -2570,13 +2582,7 @@ const randToken = () => { const a = new Uint8Array(12); crypto.getRandomValues(a
 // Liga e desliga os ouvintes de perfil e de nomes por partida conforme amigos e partidas mudam.
 function syncSocial() {
   if (!FBM() || !S.db || !S.db.watchProfile || !S.turma || !S.me) return;
-  const pm = S.social.profiles, want = new Set();
-  if (isTurmaAdmin()) want.add('*');
-  else {
-    want.add(meId());
-    for (const f of friendIds()) want.add(f);
-    for (const p of Object.values(S.players)) if (p.guest && p.createdBy === meId()) want.add(p.id);
-  }
+  const pm = S.social.profiles, want = new Set(['*']);
   for (const [k, off] of pm) if (!want.has(k)) { try { off(); } catch (e) { } pm.delete(k); if (k !== '*') delete S.profiles[k]; }
   for (const k of want) {
     if (pm.has(k)) continue;
@@ -2642,11 +2648,23 @@ async function runAutoFriend() {
   if (!other || other === meId()) return;
   const id = pairId(meId(), other);
   if (S.friendships[id]) return;
-  const data = { users: [meId(), other].sort(), from: other, status: 'accepted', via: pa.by ? 'convite' : 'turma', k: pa.k, turma: S.turmaId, created: Date.now(), acceptedAt: Date.now() };
+  const mine = myBasic();
+  const data = { users: [meId(), other].sort(), from: other, status: 'accepted', via: pa.by ? 'convite' : 'turma', k: pa.k, turma: S.turmaId, created: Date.now(), acceptedAt: Date.now(), toName: mine.name, toNick: mine.nick || '', toPhoto: '' };
   try { await window.MCloud.friendSet(id, data); } catch (e) { }
 }
 // Migração de privacidade: roda uma vez, no aparelho de quem criou a turma.
+async function healPersonal() {
+  if (S.healingPriv || !FB() || !privacyOn() || !S.firmData || !S.turma || S.turma.ownerUid !== meId() || !S.rawPersonal.size) return;
+  S.healingPriv = true;
+  try {
+    const base = `turmas/${S.turmaId}`, ids = [...S.rawPersonal].filter(id => S.players[id]);
+    await window.MCloud.batch(ids.filter(id => !S.profiles[id]).map(id => ({ op: 'set', path: `${base}/profiles/${id}`, data: profileFrom(S.players[id]) })));
+    await window.MCloud.batch(ids.map(id => ({ op: 'strip', path: `${base}/players/${id}`, fields: PERSONAL })));
+  } catch (e) { }
+  S.healingPriv = false;
+}
 async function runPrivacyMigration() {
+  if (privacyOn()) return healPersonal();
   if (S.migratingPriv || !FB() || !S.firmData || !S.turma || privacyOn() || S.turma.ownerUid !== meId() || !window.MCloud.batch) return;
   if (S.privFailAt && Date.now() - S.privFailAt < 60000) return;
   S.migratingPriv = true;
@@ -2830,8 +2848,10 @@ const ACT = {
   help: () => openSheet({ type: 'help' }),
   closeSheet: () => closeSheet(),
   elencoTab: el => { S.ui.elencoRecent = el.dataset.v === 'recentes'; render(); },
-  elencoRecent: () => { S.ui.elencoRecent = !S.ui.elencoRecent; render(); },
-  rankScope: el => { S.ui.rankScope = el.dataset.v === 'recentes' ? 'recentes' : 'amigos'; render(); },
+  elencoRecent: () => { S.ui.elencoFilter = S.ui.elencoFilter === 'recentes' ? '' : 'recentes'; render(); },
+  elencoFilter: el => { const v = el.dataset.v; S.ui.elencoFilter = S.ui.elencoFilter === v ? '' : v; render(); },
+  turmaMenu: () => { openSheet({ type: 'turmas' }); loadMyTurmas(); },
+  rankScope: el => { S.ui.rankScope = ['recentes', 'amigos'].includes(el.dataset.v) ? el.dataset.v : 'turma'; render(); },
   friendAdd: async el => {
     const u = el.dataset.uid; if (!canFriend(u) || friendState(u) !== 'none') return;
     const id = pairId(meId(), u), mine = myBasic(), th = personalOf(u) || {};
@@ -3549,7 +3569,8 @@ window.MCloud = {
   watchMembers: (t, next, error) => onSnapshot(collection(fs, 'turmas', t, 'membros'), s => next(s.docs.map(d => d.data())), e => error && error(fail(e))),
   db(t) {
     return {
-      collection: kind => ({ onSnapshot: (next, error) => onSnapshot(collection(fs, 'turmas', t, kind), s => next(wrap(s)), e => error && error(fail(e))) }),
+      // includeMetadataChanges: sem isso o Firebase não avisa quando a cópia do celular já bate com o servidor.
+      collection: kind => ({ onSnapshot: (next, error) => onSnapshot(collection(fs, 'turmas', t, kind), { includeMetadataChanges: true }, s => next(wrap(s)), e => error && error(fail(e))) }),
       doc: path => {
         const [kind, id] = path.split('/');
         const ref = doc(fs, 'turmas', t, kind, id);

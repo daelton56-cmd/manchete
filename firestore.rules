@@ -101,9 +101,9 @@ service cloud.firestore {
         allow delete: if isOwner(t);
       }
 
-      // Nome, apelido, foto, altura e idade: só o próprio, os amigos e o admin.
+      // Nome, apelido, foto, altura e idade: só quem está na turma.
       match /profiles/{p} {
-        allow read: if isMember(t) && (p == me() || isAdmin(t) || areFriends(me(), p) || guestOwner(t, p));
+        allow read: if isMember(t);
         allow create, update: if isMember(t) && (p == me() || guestOwner(t, p) || isOwner(t));
         allow delete: if isMember(t) && (p == me() || guestOwner(t, p) || isOwner(t));
       }
@@ -128,7 +128,7 @@ service cloud.firestore {
       }
 
       match /photos/{p} {
-        allow read: if isMember(t) && (p == me() || isAdmin(t) || areFriends(me(), p) || guestOwner(t, p));
+        allow read: if isMember(t);
         allow create, update: if isMember(t) && (p == me() || guestOwner(t, p));
         allow delete: if isMember(t) && (p == me() || guestOwner(t, p) || turmaDoc(t).data.ownerUid == me());
       }
