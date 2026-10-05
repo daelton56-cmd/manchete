@@ -2837,15 +2837,31 @@ function icsFor(g) {
   const fold = l => { const out = []; let rest = l; while (rest.length > 74) { out.push(rest.slice(0, 74)); rest = ' ' + rest.slice(74); } out.push(rest); return out.join('\r\n'); };
   return lines.map(fold).join('\r\n') + '\r\n';
 }
+// No iPhone, o app aberto pelo ícone não consegue abrir um arquivo de evento gerado dentro dele.
+// Por isso a Agenda do iPhone abre por um endereço real (calndr.link), que entrega o evento pronto para o iPhone.
+function appleCalUrl(g) {
+  const [y, m, d] = g.date.split('-').map(Number), [hh, mm] = g.time.split(':').map(Number);
+  const e0 = new Date(y, m - 1, d, hh + 2, mm);
+  const f = x => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())} ${pad(x.getHours())}:${pad(x.getMinutes())}`;
+  let tz = 'America/Sao_Paulo';
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || tz; } catch (er) { }
+  const turma = FBM() && S.turma && S.turma.name ? S.turma.name : '';
+  const link = FBM() ? location.origin + location.pathname : '';
+  const q = new URLSearchParams({ service: 'apple', start: `${g.date} ${g.time}`, end: f(e0), title: 'Vôlei' + (turma ? ' - ' + turma : ''), timezone: tz });
+  if (g.place) q.set('location', g.place);
+  const desc = [g.note, link ? 'Veja quem vai no Manchete: ' + link : ''].filter(Boolean).join('\n');
+  if (desc) q.set('description', desc);
+  return 'https://calndr.link/d/event/?' + q.toString();
+}
 function agendaHTML(g) {
   const ics = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(icsFor(g));
   const ios = isIOS();
-  return `<p class="sub" style="margin:-4px 0 12px">${esc(fmtDay(g.date))}, ${esc(fmtTime(g.time))}${g.place ? ', ' + esc(g.place) : ''}. O evento já vai com um lembrete 2 horas antes.</p>
+  return `<p class="sub" style="margin:-4px 0 12px">${esc(fmtDay(g.date))}, ${esc(fmtTime(g.time))}${g.place ? ', ' + esc(g.place) : ''}.</p>
   <div class="action-list" role="list">
-    <a class="action-row" role="listitem" href="${ics}" target="_blank" rel="noopener"${ios ? '' : ' download="volei.ics"'} data-act="agendaPicked">${ICON.cal}<span>${ios ? 'Agenda do iPhone' : 'Agenda do celular (arquivo .ics)'}</span></a>
+    <a class="action-row" role="listitem" href="${ios ? esc(appleCalUrl(g)) : ics}" target="_blank" rel="noopener"${ios ? '' : ' download="volei.ics"'} data-act="agendaPicked">${ICON.cal}<span>${ios ? 'Agenda do iPhone' : 'Agenda do celular (arquivo .ics)'}</span></a>
     <a class="action-row" role="listitem" href="${esc(gcalUrl(g))}" target="_blank" rel="noopener" data-act="agendaPicked">${ICON.cal}<span>Google Agenda</span></a>
   </div>
-  ${ios ? '<p class="sub small" style="margin-top:10px">Na Agenda do iPhone, abre a tela do evento: toque em Adicionar.</p>' : ''}`;
+  ${ios ? '<p class="sub small" style="margin-top:10px">Abre a tela do evento da Agenda do iPhone: confira e toque em Adicionar. Se o iPhone perguntar, toque em Permitir.</p>' : ''}`;
 }
 function gcalUrl(g) {
   const [y, m, d] = g.date.split('-').map(Number); const [hh, mm] = g.time.split(':').map(Number);
