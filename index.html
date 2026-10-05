@@ -973,7 +973,9 @@ function D() {
       view[p.id] = Object.assign({}, p, { at: c.at, forma: c.forma, n: c.n, tot: c.tot, hist: c.hist, last: c.last, calib: c.calib });
       if (FBM()) {
         const pi = personalOf(p.id), v = view[p.id];
-        if (pi) { v.name = pi.name || v.name; v.nick = pi.nick != null ? pi.nick : v.nick; v.photo = pi.photo || (privacyOn() ? '' : v.photo); if (pi.height !== undefined) v.height = pi.height; if (pi.birthYear !== undefined) v.birthYear = pi.birthYear; }
+        // No formato antigo a carta ainda tem nome e apelido: ela manda, e o resto só preenche o que faltar.
+        if (pi && !privacyOn() && p.name) { if (!v.photo && pi.photo) v.photo = pi.photo; }
+        else if (pi) { v.name = pi.name || v.name; v.nick = pi.nick != null ? pi.nick : v.nick; v.photo = pi.photo || (privacyOn() ? '' : v.photo); if (pi.height !== undefined) v.height = pi.height; if (pi.birthYear !== undefined) v.birthYear = pi.birthYear; }
         v.known = !!pi || (!!p.name && !privacyOn());
         if (!v.name) v.name = 'Jogador';
       }
@@ -1232,6 +1234,7 @@ async function onAuthChange(u) {
   const ud = await window.MCloud.getUser(u.uid).catch(() => null);
   if (S.pendingName) S.me.name = S.pendingName; else if (ud && ud.name) S.me.name = ud.name;
   S.userTourDone = !!(ud && ud.tourDone);
+  syncPublicProfile();
   S.notifSeenCloud = (ud && ud.notifSeen) || 0;
   S.pendingName = '';
   let t = null;
@@ -1623,7 +1626,7 @@ function whoPlayedHTML(g) {
 function elencoSocial() {
   const filter = S.ui.elencoFilter || '', mine = P(meId());
   let h = banners();
-  h += `<div class="search-box" role="search"><span class="search-ico" aria-hidden="true">${ICON.search}</span><input class="input" id="peopleQ" data-input="peopleQ" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Buscar por nome, apelido ou e-mail" aria-label="Buscar pessoas por nome, apelido ou e-mail" value="${esc(S.ui.peopleQ || '')}"></div><div id="peopleRes" aria-live="polite">${peopleResHTML()}</div>`;
+  h += searchBoxHTML();
   if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${plural(friendIds().length, 'amigo', 'amigos')}</div></div></div>`;
   if (!filter) { const sug = suggestions(); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
   const cnt = coPlayers();
@@ -1650,11 +1653,15 @@ function elencoSocial() {
   }
   return h;
 }
+function searchBoxHTML() {
+  if (!FB() || !window.MCloud.searchPeople) return '';
+  return `<div class="search-box" role="search"><span class="search-ico" aria-hidden="true">${ICON.search}</span><input class="input" id="peopleQ" data-input="peopleQ" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Buscar por nome, apelido ou e-mail" aria-label="Buscar pessoas por nome, apelido ou e-mail" value="${esc(S.ui.peopleQ || '')}"></div><div id="peopleRes" aria-live="polite">${peopleResHTML()}</div>`;
+}
 function elencoView() {
   if (FB() && privacyOn()) return elencoSocial();
   const mine = FB() ? P(meId()) : null;
   const ps = Object.keys(S.players).map(P).filter(p => !mine || p.id !== mine.id);
-  let h = banners();
+  let h = banners() + searchBoxHTML();
   if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${mine.n ? `${plural(mine.tot.jogos, 'jogo', 'jogos')}, ${mine.tot.sets ? Math.round(100 * mine.tot.setsV / mine.tot.sets) + '% dos sets ganhos' : 'sem sets ainda'}` : 'Ainda sem jogos com placar.'}</div><button class="btn btn-sm" style="margin-top:10px" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar</button></div></div>`;
   if (!ps.length) {
     return h + `<div class="empty" style="margin-top:16px"><h3>${FB() ? 'Só você por aqui' : 'Ninguém no elenco'}</h3><p class="sub">${FB() ? 'Mande o link da turma para a galera. Cada um cria a própria carta.' : 'Cadastre cada jogador com uma nota de 40 a 90 em cada fundamento. A carta nasce daí e evolui a cada jogo.'}</p>${FB() ? `<div class="row-wrap"><button class="btn btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${mine ? `<button class="btn" data-act="newGuest">${ICON.plus}Convidado sem conta</button>` : ''}</div>` : (S.canWrite ? `<button class="btn btn-ball" data-act="newPlayer">${ICON.plus}Novo jogador</button>` : '')}</div>`;
@@ -2503,10 +2510,10 @@ function thumbOf(src, size = 96) {
   });
 }
 async function syncPublicProfile() {
-  if (!FB() || !window.MCloud.setPublicProfile || !S.me || !P(meId())) return;
+  if (!FBM() || !window.MCloud.setPublicProfile || !S.me || !S.me.uid) return;
   try {
     const mine = myBasic(), photo = await thumbOf(mine.photo);
-    const emailHash = S.me.email ? await sha256hex(normS(S.me.email)) : '';
+    let emailHash = ''; try { emailHash = S.me.email ? await sha256hex(normS(S.me.email)) : ''; } catch (e) { }
     const data = { name: mine.name, nick: mine.nick || '', photo, keys: searchKeys(mine.name, mine.nick), emailHash, updated: Date.now() };
     const sig = JSON.stringify([data.name, data.nick, photo.length, emailHash]), k = 'manchete:pub:' + meId();
     let done = ''; try { done = localStorage.getItem(k) || ''; } catch (e) { }
@@ -2529,25 +2536,54 @@ function peopleResHTML() {
     return `<div class="pres">${here ? `<button class="sug-av" data-act="openPlayer" data-pid="${esc(x.uid)}" aria-label="Ver ${esc(x.nick || x.name)}">${avatar(x)}</button>` : avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">${line}</div></div>${friendBtn(x.uid)}</div>`;
   }));
 }
+// Pessoas que o app já conhece: todo mundo da turma e os amigos (e amigos dos amigos).
+function knownPeople() {
+  const out = new Map();
+  const add = (uid, info) => {
+    if (!uid || uid === meId() || String(uid).startsWith('g_') || !info || !info.name || info.name === 'Jogador' || out.has(uid)) return;
+    out.set(uid, { uid, name: info.name, nick: info.nick || '', photo: smallPhoto(info.photo) });
+  };
+  for (const id of Object.keys(S.players)) { const p = P(id); if (p && !p.guest && p.ownerUid) add(id, p); }
+  for (const [u, x] of Object.entries(S.myMirrors)) add(u, x);
+  for (const list of Object.values(S.fofMirrors)) for (const [u, x] of Object.entries(list || {})) add(u, x);
+  for (const [u, x] of Object.entries(S.publicProfiles)) add(u, x);
+  return [...out.values()];
+}
+// Enquanto digita, já mostra quem o app conhece; a busca no app inteiro vem logo depois.
+function searchWords(q) { return normS(q).split(/[^a-z0-9]+/).filter(w => w.length >= 1); }
+function localMatch(words, x) { const full = normS(x.name + ' ' + (x.nick || '')), ks = searchKeys(x.name, x.nick); return words.length > 0 && words.every(w => full.includes(w) || ks.includes(w.slice(0, 14))); }
+function showLocalHits() {
+  const q = (S.ui.peopleQ || '').trim(), el = $('#peopleRes');
+  if (normS(q).length < 2 || q.includes('@')) { if (normS(q).length < 2) { S.ui.peopleHits = null; S.ui.peopleBusy = false; } if (el) el.innerHTML = peopleResHTML(); return; }
+  const words = searchWords(q), local = knownPeople().filter(x => localMatch(words, x));
+  S.ui.peopleHits = local.length ? local : null; S.ui.peopleBusy = true;
+  if (el) el.innerHTML = peopleResHTML();
+}
 function runSearch() {
   const q = (S.ui.peopleQ || '').trim(), n = ++SEARCH_N;
   const box = () => { const el = $('#peopleRes'); if (el) el.innerHTML = peopleResHTML(); };
   if (normS(q).length < 2) { S.ui.peopleHits = null; S.ui.peopleBusy = false; box(); return; }
-  S.ui.peopleBusy = true; S.ui.peopleHits = null; box();
+  const isMail = q.includes('@');
+  const words = searchWords(q);
+  const match = x => localMatch(words, x);
+  const local = isMail ? [] : knownPeople().filter(match);
+  S.ui.peopleHits = local.length ? local : null; S.ui.peopleBusy = true; box();
   (async () => {
     let list = [];
     try {
-      if (q.includes('@')) list = await window.MCloud.searchPeople({ emailHash: await sha256hex(normS(q)) });
-      else {
-        const words = normS(q).split(/[^a-z0-9]+/).filter(w => w.length >= 2);
-        const key = words.sort((a, b) => b.length - a.length)[0];
-        if (key) list = (await window.MCloud.searchPeople({ key: key.slice(0, 14) })).filter(d => words.every(w => (d.keys || []).includes(w.slice(0, 14))));
+      if (isMail) {
+        let h = ''; try { h = await sha256hex(normS(q)); } catch (e) { }
+        if (h) list = await window.MCloud.searchPeople({ emailHash: h });
+      } else {
+        const key = words.filter(w => w.length >= 2).sort((a, b) => b.length - a.length)[0];
+        if (key) list = (await window.MCloud.searchPeople({ key: key.slice(0, 14) })).filter(d => match({ name: d.name || '', nick: d.nick || '' }));
       }
     } catch (e) { list = []; }
     if (n !== SEARCH_N) return;
-    const hits = list.filter(d => d && d.uid && d.uid !== meId()).map(d => Object.assign({ uid: d.uid }, basicFrom(d)));
-    for (const x of hits) S.publicProfiles[x.uid] = { name: x.name, nick: x.nick, photo: x.photo };
-    S.ui.peopleHits = hits; S.ui.peopleBusy = false; dirty(); box();
+    const seen = new Set(local.map(x => x.uid));
+    const remote = list.filter(d => d && d.uid && d.uid !== meId() && !seen.has(d.uid)).map(d => Object.assign({ uid: d.uid }, basicFrom(d)));
+    for (const x of remote) S.publicProfiles[x.uid] = { name: x.name, nick: x.nick, photo: x.photo };
+    S.ui.peopleHits = local.concat(remote); S.ui.peopleBusy = false; dirty(); box();
   })();
 }
 // Quem vai: antes do jogo, já dá para adicionar quem confirmou.
@@ -3387,7 +3423,7 @@ function numCheck(el, leaving) {
   if (leaving && raw === '') { el.value = formValue(a); el.classList.remove('bad'); if (er) er.textContent = ''; }
 }
 const INP = {
-  peopleQ: el => { S.ui.peopleQ = el.value.slice(0, 80); clearTimeout(SEARCH_T); SEARCH_T = setTimeout(runSearch, 350); },
+  peopleQ: el => { S.ui.peopleQ = el.value.slice(0, 80); showLocalHits(); clearTimeout(SEARCH_T); SEARCH_T = setTimeout(runSearch, 350); },
   pname: () => updateFormPreview(),
   num: el => numCheck(el, false)
 };
