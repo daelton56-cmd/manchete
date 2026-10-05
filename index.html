@@ -293,6 +293,11 @@ td .num{font-size:18px}
 .card-add svg{width:max(12px, 6cqw); height:max(12px, 6cqw)}
 .card-add.sent{background:rgba(30,42,58,.10); color:#1E2A3A; box-shadow:inset 0 0 0 1px rgba(30,42,58,.4)}
 .chip-sep{flex:0 0 1px; width:1px; height:26px; background:var(--line-strong); margin:0 2px}
+.search-box{position:relative; margin:14px 0 6px}
+.search-box .input{padding-left:42px}
+.search-ico{position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--muted); display:grid; pointer-events:none}
+.search-ico svg{width:18px; height:18px}
+#peopleRes .list{margin-bottom:6px}
 .chips-line{display:flex; gap:8px; align-items:center; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; margin:0 0 12px; padding-bottom:2px}
 .chips-line::-webkit-scrollbar{display:none}
 .chips-line .chip{flex:0 0 auto; padding:7px 13px; font-size:14px}
@@ -820,6 +825,7 @@ const ICON = {
   podium: svg('<path d="M3 20h18M5 20v-6h4v6M10 20V8h4v12M15 20v-9h4v9"/>'),
   back: svg('<path d="M15 18l-6-6 6-6"/>'),
   chev: svg('<path d="M9 6l6 6-6 6"/>'),
+  search: svg('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),
   bell: svg('<path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
   help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.2-1 .7-1 1.3v.6M12 17v.2"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
@@ -845,7 +851,7 @@ const S = {
   ui: { tab: 'jogos', gameId: null, step: null, selP: null, swapSel: null, sort: 'ovr', rankSort: 'ovr', openRep: null, flash: '', sheet: null, form: null, pendingRender: false },
   migrateOffer: false,
   me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false,
-  friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
+  friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
 };
 const FBM = () => !!window.MANCHETE_FIREBASE;
 const FB = () => FBM() && S.mode === 'cloud' && !!S.me && !!S.turmaId;
@@ -1128,7 +1134,7 @@ function subscribe() {
         if (FB() && !S.players[meId()]) setTimeout(() => { if (FB() && !S.players[meId()] && !S.ui.sheet) ACT.newSelf(); }, 60);
       }
       if (got.players && got.games && S.mode === 'cloud') upgradeData();
-      if (firm.players && firm.games) { S.firmData = true; checkMigration(); runPrivacyMigration(); }
+      if (firm.players && firm.games) { S.firmData = true; checkMigration(); runPrivacyMigration(); syncPublicProfile(); }
       syncSocial();
       if (S.mode === 'cloud') render();
     }, err => {
@@ -1206,7 +1212,7 @@ function stopListening() {
   for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } }
   for (const m of [S.social.profiles, S.social.rosters]) { for (const off of m.values()) { try { off(); } catch (e) { } } m.clear(); }
 }
-function resetData() { S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.myToken = ''; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
+function resetData() { S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
 function bootFirebase() {
   S.mode = 'auth-wait'; S.invite = readInvite(); render();
   const go = () => { if (S.authOff) return; S.authOff = window.MCloud.onAuth(u => onAuthChange(u)); };
@@ -1609,6 +1615,7 @@ function whoPlayedHTML(g) {
 function elencoSocial() {
   const recent = !!S.ui.elencoRecent, mine = P(meId());
   let h = banners();
+  h += `<div class="search-box" role="search"><span class="search-ico" aria-hidden="true">${ICON.search}</span><input class="input" id="peopleQ" data-input="peopleQ" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Buscar por nome, apelido ou e-mail" aria-label="Buscar pessoas por nome, apelido ou e-mail" value="${esc(S.ui.peopleQ || '')}"></div><div id="peopleRes" aria-live="polite">${peopleResHTML()}</div>`;
   if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${plural(friendIds().length, 'amigo', 'amigos')}</div></div></div>`;
   if (!recent) { const sug = suggestions(); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
   const cnt = coPlayers();
@@ -1727,6 +1734,7 @@ function presencaStep(g, confN) {
   if (FB() && !W) h += `<p class="sub small" style="margin-top:10px">Quem marcou o jogo cuida dos times, da súmula e do placar.</p>`;
   if (!Object.keys(S.players).length) h += `<p class="sub" style="margin-top:10px">O elenco está vazio. Cadastre os jogadores para confirmar presença.</p>`;
   if (conf.length >= 4 && W) h += `<div style="margin-top:12px"><button class="btn btn-block btn-ball" data-act="step" data-step="times">Ir para os times</button></div>`;
+  h += whoGoingHTML(g);
   return h;
 }
 function timesStep(g) {
@@ -2419,7 +2427,7 @@ function friendState(u) {
 }
 const friendIds = () => Object.values(S.friendships).filter(f => f.status === 'accepted' && f.users).map(f => f.users.find(x => x !== meId())).filter(Boolean);
 const hasAccount = id => { const p = S.players[id]; return !!(p && !p.guest && p.ownerUid); };
-const canFriend = id => FB() && hasAccount(id) && id !== meId() && !!S.members[id] && !!S.members[meId()];
+const canFriend = id => FB() && !!id && id !== meId() && !String(id).startsWith('g_') && (hasAccount(id) || !!S.publicProfiles[id]);
 const smallPhoto = ph => (typeof ph === 'string' && PHOTO_RE.test(ph) && ph.length < 200000 ? ph : '');
 function cleanProfile(d) {
   d = d || {};
@@ -2438,6 +2446,7 @@ function personalOf(id) {
   if (best) return best;
   if (S.myMirrors[id]) return S.myMirrors[id];
   for (const list of Object.values(S.fofMirrors)) if (list && list[id]) return list[id];
+  if (S.publicProfiles[id]) return S.publicProfiles[id];
   for (const f of Object.values(S.friendships)) {
     if (!f.users || !f.users.includes(id)) continue;
     if (f.from === id && f.fromName) return cleanProfile({ name: f.fromName, nick: f.fromNick, photo: f.fromPhoto });
@@ -2459,6 +2468,83 @@ function coPlayers() {
   return out;
 }
 function gamesTogether(id) { const me = meId(); let n = 0; for (const g of Object.values(S.games)) if (hasResult(g) && teamIds(g).includes(me) && teamIds(g).includes(id)) n++; return n; }
+
+// ---------- Busca de pessoas (app inteiro) ----------
+const normS = v => norm(v).trim();
+function searchKeys(name, nick) {
+  const out = new Set();
+  for (const w of normS(name + ' ' + nick).split(/[^a-z0-9]+/)) for (let k = 2; k <= Math.min(w.length, 14); k++) out.add(w.slice(0, k));
+  return [...out].slice(0, 120);
+}
+async function sha256hex(t) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+  return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
+}
+// Foto bem pequena para a vitrine da busca (para não pesar nos resultados).
+function thumbOf(src, size = 96) {
+  return new Promise(res => {
+    if (!src || !PHOTO_RE.test(src)) return res('');
+    const img = new Image();
+    img.onload = () => { try { const c = document.createElement('canvas'); c.width = c.height = size; const ctx = c.getContext('2d'); const sd = Math.min(img.width, img.height); ctx.drawImage(img, (img.width - sd) / 2, (img.height - sd) / 2, sd, sd, 0, 0, size, size); res(c.toDataURL('image/jpeg', 0.7)); } catch (e) { res(''); } };
+    img.onerror = () => res('');
+    img.src = src;
+  });
+}
+async function syncPublicProfile() {
+  if (!FB() || !window.MCloud.setPublicProfile || !S.me || !P(meId())) return;
+  try {
+    const mine = myBasic(), photo = await thumbOf(mine.photo);
+    const emailHash = S.me.email ? await sha256hex(normS(S.me.email)) : '';
+    const data = { name: mine.name, nick: mine.nick || '', photo, keys: searchKeys(mine.name, mine.nick), emailHash, updated: Date.now() };
+    const sig = JSON.stringify([data.name, data.nick, photo.length, emailHash]), k = 'manchete:pub:' + meId();
+    let done = ''; try { done = localStorage.getItem(k) || ''; } catch (e) { }
+    if (done === sig) return;
+    await window.MCloud.setPublicProfile(meId(), data);
+    try { localStorage.setItem(k, sig); } catch (e) { }
+  } catch (e) { }
+}
+let SEARCH_T = null, SEARCH_N = 0;
+function peopleResHTML() {
+  const q = S.ui.peopleQ || '', hits = S.ui.peopleHits;
+  if (normS(q).length < 2) return '';
+  if (S.ui.peopleBusy && !hits) return '<p class="sub small" style="margin:8px 2px">Buscando…</p>';
+  if (!hits || !hits.length) return `<p class="sub small" style="margin:8px 2px">Ninguém encontrado.${q.includes('@') ? ' Pelo e-mail, só acha digitando ele completo.' : ' Para achar pelo e-mail, digite ele completo.'}</p>`;
+  return listBox(hits.map(x => {
+    const st = friendState(x.uid), here = !!S.players[x.uid];
+    const full = x.nick && x.nick !== x.name;
+    const sub = st === 'friend' ? 'amigo' : here ? 'está nesta turma' : 'de outra turma';
+    const line = full ? `${esc(x.name)}, ${sub}` : sub.charAt(0).toUpperCase() + sub.slice(1);
+    return `<div class="pres">${here ? `<button class="sug-av" data-act="openPlayer" data-pid="${esc(x.uid)}" aria-label="Ver ${esc(x.nick || x.name)}">${avatar(x)}</button>` : avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">${line}</div></div>${friendBtn(x.uid)}</div>`;
+  }));
+}
+function runSearch() {
+  const q = (S.ui.peopleQ || '').trim(), n = ++SEARCH_N;
+  const box = () => { const el = $('#peopleRes'); if (el) el.innerHTML = peopleResHTML(); };
+  if (normS(q).length < 2) { S.ui.peopleHits = null; S.ui.peopleBusy = false; box(); return; }
+  S.ui.peopleBusy = true; S.ui.peopleHits = null; box();
+  (async () => {
+    let list = [];
+    try {
+      if (q.includes('@')) list = await window.MCloud.searchPeople({ emailHash: await sha256hex(normS(q)) });
+      else {
+        const words = normS(q).split(/[^a-z0-9]+/).filter(w => w.length >= 2);
+        const key = words.sort((a, b) => b.length - a.length)[0];
+        if (key) list = (await window.MCloud.searchPeople({ key: key.slice(0, 14) })).filter(d => words.every(w => (d.keys || []).includes(w.slice(0, 14))));
+      }
+    } catch (e) { list = []; }
+    if (n !== SEARCH_N) return;
+    const hits = list.filter(d => d && d.uid && d.uid !== meId()).map(d => Object.assign({ uid: d.uid }, basicFrom(d)));
+    for (const x of hits) S.publicProfiles[x.uid] = { name: x.name, nick: x.nick, photo: x.photo };
+    S.ui.peopleHits = hits; S.ui.peopleBusy = false; dirty(); box();
+  })();
+}
+// Quem vai: antes do jogo, já dá para adicionar quem confirmou.
+function whoGoingHTML(g) {
+  if (!FB() || !privacyOn() || hasResult(g)) return '';
+  const ids = g.conf.filter(id => id !== meId() && P(id) && canFriend(id) && friendState(id) !== 'friend');
+  if (!ids.length) return '';
+  return section('Quem vai e ainda não é seu amigo', listBox(ids.map(id => { const p = P(id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)}</div></div>${friendBtn(id)}</div>`; })));
+}
 
 function startSocial() {
   if (!FBM() || !window.MCloud.watchFriendships) return;
@@ -2618,6 +2704,7 @@ function saveProfile(id) {
   S.profiles[id] = pr; dirty();
   const jobs = [S.db.setProfile(id, pr)];
   if (id === meId()) {
+    setTimeout(syncPublicProfile, 50);
     const b = basicFrom(pr);
     for (const f of friendIds()) jobs.push(window.MCloud.mirrorSet(f, meId(), b).catch(() => { }));
     for (const g of Object.values(S.games)) if (g.status !== 'encerrado' && g.date >= todayStr() && participantsOf(g).includes(id)) jobs.push(S.db.setRoster(g.id, id, b).catch(() => { }));
@@ -2748,7 +2835,7 @@ const ACT = {
   friendAdd: async el => {
     const u = el.dataset.uid; if (!canFriend(u) || friendState(u) !== 'none') return;
     const id = pairId(meId(), u), mine = myBasic(), th = personalOf(u) || {};
-    const data = { users: [meId(), u].sort(), from: meId(), status: 'pending', turma: S.turmaId, created: Date.now(), fromName: mine.name, fromNick: mine.nick, fromPhoto: mine.photo, toName: th.name || '', toNick: th.nick || '', toPhoto: smallPhoto(th.photo) };
+    const data = { users: [meId(), u].sort(), from: meId(), status: 'pending', turma: S.members[u] ? S.turmaId : null, created: Date.now(), fromName: mine.name, fromNick: mine.nick, fromPhoto: mine.photo, toName: th.name || '', toNick: th.nick || '', toPhoto: smallPhoto(th.photo) };
     S.friendships[id] = Object.assign({ id }, data); dirty(); render(); if (S.ui.sheet) renderSheet();
     try { await window.MCloud.friendSet(id, data); toast(`Pedido de amizade enviado para ${nameOf(u)}.`); }
     catch (e) { delete S.friendships[id]; dirty(); render(); if (S.ui.sheet) renderSheet(); toast('Não consegui mandar o pedido. Tente de novo.'); }
@@ -3280,6 +3367,7 @@ function numCheck(el, leaving) {
   if (leaving && raw === '') { el.value = formValue(a); el.classList.remove('bad'); if (er) er.textContent = ''; }
 }
 const INP = {
+  peopleQ: el => { S.ui.peopleQ = el.value.slice(0, 80); clearTimeout(SEARCH_T); SEARCH_T = setTimeout(runSearch, 350); },
   pname: () => updateFormPreview(),
   num: el => numCheck(el, false)
 };
@@ -3327,7 +3415,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top
 // Manchete: ponte com o Firebase (login por e-mail e senha + banco Firestore)
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, collection, setDoc, getDoc, getDocs, deleteDoc, updateDoc, onSnapshot, writeBatch, arrayUnion, arrayRemove, query, where, deleteField } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, collection, setDoc, getDoc, getDocs, deleteDoc, updateDoc, onSnapshot, writeBatch, arrayUnion, arrayRemove, query, where, deleteField, limit } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const app = initializeApp(window.MANCHETE_FIREBASE);
 const auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
@@ -3374,6 +3462,10 @@ window.MCloud = {
     await guard(setDoc(doc(fs, 'users', me.uid), { lastTurma: t, turmas: arrayUnion(t) }, { merge: true }));
     return !already;
   },
+  // ---------- Busca de pessoas ----------
+  setPublicProfile: (uid, data) => guard(setDoc(doc(fs, 'perfisPublicos', uid), data)),
+  searchPeople: ({ key, emailHash }) => guard(getDocs(query(collection(fs, 'perfisPublicos'), emailHash ? where('emailHash', '==', emailHash) : where('keys', 'array-contains', key), limit(20)))
+    .then(s => s.docs.map(d => ({ uid: d.id, ...d.data() })))),
   // ---------- Amizades ----------
   watchFriendships: (uid, next, error) => onSnapshot(query(collection(fs, 'friendships'), where('users', 'array-contains', uid)), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
   friendSet: (id, data) => guard(setDoc(doc(fs, 'friendships', id), data)),
@@ -3419,6 +3511,7 @@ window.MCloud = {
       try { await deleteDoc(doc(fs, 'turmas', t, 'photos', u.uid)); } catch (e) { }
       try { await deleteDoc(doc(fs, 'turmas', t, 'membros', u.uid)); } catch (e) { }
     }
+    try { await deleteDoc(doc(fs, 'perfisPublicos', u.uid)); } catch (e) { }
     try { await deleteDoc(doc(fs, 'users', u.uid)); } catch (e) { }
     await guard(deleteUser(u));
   },
