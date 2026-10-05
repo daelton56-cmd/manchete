@@ -293,6 +293,11 @@ td .num{font-size:18px}
 .card-add svg{width:max(12px, 6cqw); height:max(12px, 6cqw)}
 .card-add.sent{background:rgba(30,42,58,.10); color:#1E2A3A; box-shadow:inset 0 0 0 1px rgba(30,42,58,.4)}
 .chip-sep{flex:0 0 1px; width:1px; height:26px; background:var(--line-strong); margin:0 2px}
+.action-list{background:var(--surface); border:1px solid var(--line); border-radius:16px; overflow:hidden}
+.action-row{display:flex; align-items:center; gap:12px; min-height:56px; padding:0 16px; font-size:17px; font-weight:500; color:var(--ink); text-decoration:none}
+.action-row + .action-row{border-top:1px solid var(--line)}
+.action-row svg{width:20px; height:20px; color:var(--muted)}
+.action-row:active{background:var(--line)}
 .link-btn{padding:0; color:var(--ink); font-weight:700; text-decoration:underline; text-underline-offset:2px; font-size:inherit}
 .turma-switch{display:inline-flex; align-items:center; gap:6px; padding:0; color:var(--ink)}
 .turma-switch svg{width:22px; height:22px; margin-top:2px}
@@ -1744,7 +1749,7 @@ function presencaStep(g, confN) {
   const paid = g.paid.filter(id => confSet.has(id)).length;
   let h = `<p class="sub" style="margin:12px 0">${confN ? `${plural(confN, 'confirmado', 'confirmados')}${g.max ? ` para ${g.max} vagas` : ''}${wait ? `, ${wait} na espera` : ''}${paid ? `. ${paid} já ${paid === 1 ? 'pagou' : 'pagaram'}` : ''}.` : 'Toque em confirmar para quem vai jogar. A ordem de confirmação vira a ordem de chegada.'}</p>`;
   if (FB() && g.vis === 'privada') h += `<p class="sub small" style="margin:-4px 0 10px">Partida privada: ${plural(g.allowed.filter(u => u !== g.createdBy).length, 'convidado', 'convidados')} além de quem marcou.</p>`;
-  h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><a class="btn btn-sm" href="${esc(gcalUrl(g))}" target="_blank" rel="noopener">${ICON.cal}Google Agenda</a></div>`;
+  h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><button class="btn btn-sm" data-act="openAgenda">${ICON.cal}Agendar</button></div>`;
   const row = (p, i, on) => `<div class="pres">
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
     <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
@@ -1946,6 +1951,7 @@ function renderSheet() {
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
+  else if (s.type === 'agenda') { const g = S.games[s.gameId]; if (!g) return closeSheet(); title = 'Adicionar à agenda'; body = agendaHTML(g); }
   else if (s.type === 'turmas') { title = 'Suas turmas'; body = myTurmasList(S.turmaId) + `<div style="display:grid;gap:10px;margin-top:12px"><button class="btn btn-block" data-act="newTurma">${ICON.plus}Nova turma</button></div><p class="sub small" style="margin-top:10px">Cada turma é um vôlei com as próprias cartas, jogos e ranking.</p>`; }
   else if (s.type === 'unfriend') { const nm = nameOf(s.uid); title = 'Desfazer amizade'; body = `<p>${esc(nm)} sai da sua aba Amigos e você sai da dele. Se vocês jogaram juntos recentemente, continuam aparecendo em Jogou recentemente.</p><div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-danger" data-act="unfriend" data-uid="${esc(s.uid)}">Desfazer amizade</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Cancelar</button></div>`; }
   else if (s.type === 'turmaName') {
@@ -2813,6 +2819,34 @@ async function copyText(text) {
   } catch (e) { }
   openSheet({ type: 'copy', text });
 }
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function icsFor(g) {
+  const [y, m, d] = g.date.split('-').map(Number), [hh, mm] = g.time.split(':').map(Number);
+  const s0 = new Date(y, m - 1, d, hh, mm), e0 = new Date(y, m - 1, d, hh + 2, mm);
+  const f = x => `${x.getFullYear()}${pad(x.getMonth() + 1)}${pad(x.getDate())}T${pad(x.getHours())}${pad(x.getMinutes())}00`;
+  const now = new Date(), stamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
+  const txt = v => String(v || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const turma = FBM() && S.turma && S.turma.name ? S.turma.name : '';
+  const link = FBM() ? inviteLink(g.id) : '';
+  const desc = [g.note, link ? 'Confirme e veja quem vai: ' + link : ''].filter(Boolean).join('\n');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Manchete//Volei//PT-BR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+    `UID:${g.id}@manchete`, `DTSTAMP:${stamp}`, `DTSTART:${f(s0)}`, `DTEND:${f(e0)}`,
+    `SUMMARY:${txt('Vôlei' + (turma ? ' - ' + turma : ''))}`, g.place ? `LOCATION:${txt(g.place)}` : '', desc ? `DESCRIPTION:${txt(desc)}` : '', link ? `URL:${link}` : '',
+    'BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', `DESCRIPTION:${txt('Vôlei daqui a 2 horas')}`, 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].filter(Boolean);
+  // Linhas longas quebradas em 74 caracteres, como pede o padrão do arquivo de agenda.
+  const fold = l => { const out = []; let rest = l; while (rest.length > 74) { out.push(rest.slice(0, 74)); rest = ' ' + rest.slice(74); } out.push(rest); return out.join('\r\n'); };
+  return lines.map(fold).join('\r\n') + '\r\n';
+}
+function agendaHTML(g) {
+  const ics = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(icsFor(g));
+  const ios = isIOS();
+  return `<p class="sub" style="margin:-4px 0 12px">${esc(fmtDay(g.date))}, ${esc(fmtTime(g.time))}${g.place ? ', ' + esc(g.place) : ''}. O evento já vai com um lembrete 2 horas antes.</p>
+  <div class="action-list" role="list">
+    <a class="action-row" role="listitem" href="${ics}" target="_blank" rel="noopener"${ios ? '' : ' download="volei.ics"'} data-act="agendaPicked">${ICON.cal}<span>${ios ? 'Agenda do iPhone' : 'Agenda do celular (arquivo .ics)'}</span></a>
+    <a class="action-row" role="listitem" href="${esc(gcalUrl(g))}" target="_blank" rel="noopener" data-act="agendaPicked">${ICON.cal}<span>Google Agenda</span></a>
+  </div>
+  ${ios ? '<p class="sub small" style="margin-top:10px">Na Agenda do iPhone, abre a tela do evento: toque em Adicionar.</p>' : ''}`;
+}
 function gcalUrl(g) {
   const [y, m, d] = g.date.split('-').map(Number); const [hh, mm] = g.time.split(':').map(Number);
   const s = new Date(y, m - 1, d, hh, mm), e = new Date(y, m - 1, d, hh + 2, mm);
@@ -3137,6 +3171,8 @@ const ACT = {
     copyText(text);
   },
   openInvite: () => { const g = curGame(); if (g) openSheet({ type: 'invite', gameId: g.id }); },
+  openAgenda: () => { const g = curGame(); if (g) openSheet({ type: 'agenda', gameId: g.id }); },
+  agendaPicked: () => { setTimeout(closeSheet, 400); },
   setVis: el => {
     const g = S.games[S.ui.sheet && S.ui.sheet.gameId]; if (!g || !canEditGame(g) || !FB()) return;
     g.vis = ['privada', 'amigos'].includes(el.dataset.v) ? el.dataset.v : 'turma';
