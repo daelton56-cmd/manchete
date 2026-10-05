@@ -11,6 +11,10 @@ service cloud.firestore {
     function playerDoc(t, p) { return get(/databases/$(database)/documents/turmas/$(t)/players/$(p)); }
     function guestOwner(t, p) { return exists(/databases/$(database)/documents/turmas/$(t)/players/$(p)) && playerDoc(t, p).data.guest == true && (playerDoc(t, p).data.createdBy == me() || isAdmin(t)); }
     function canJoin(d) { return d.get('vis', 'turma') != 'privada' || me() in d.get('allowed', []); }
+    function inTeams(d) {
+      let ts = d.get('teams', null);
+      return ts != null && ((ts.size() > 0 && me() in ts[0]) || (ts.size() > 1 && me() in ts[1]) || (ts.size() > 2 && me() in ts[2]) || (ts.size() > 3 && me() in ts[3]));
+    }
     function resultSame() {
       return request.resource.data.get('sets', []) == resource.data.get('sets', [])
         && request.resource.data.get('teams', null) == resource.data.get('teams', null)
@@ -57,12 +61,15 @@ service cloud.firestore {
 
       match /games/{g} {
         allow read: if isMember(t);
-        allow create: if isMember(t) && request.resource.data.createdBy == me() && request.resource.data.get('confirms', {}).size() == 0;
+        allow create: if isMember(t) && request.resource.data.createdBy == me() && request.resource.data.get('confirms', {}).size() == 0 && request.resource.data.get('votes', {}).size() == 0;
         allow update: if isMember(t) && same('createdBy') && (
-          ((resource.data.createdBy == me() || isAdmin(t)) && same('confirms')
+          ((resource.data.createdBy == me() || isAdmin(t)) && same('confirms') && same('votes')
             && (resultSame() || request.resource.data.get('resultRev', 0) > resource.data.get('resultRev', 0)))
           || (changed().hasOnly(['conf']) && canJoin(resource.data)
               && request.resource.data.get('conf', []).removeAll([me()]) == resource.data.get('conf', []).removeAll([me()]))
+          || (changed().hasOnly(['votes']) && inTeams(resource.data)
+              && request.resource.data.get('votes', {}).diff(resource.data.get('votes', {})).affectedKeys().hasOnly([me()])
+              && (!(me() in request.resource.data.get('votes', {})) || (request.resource.data.votes[me()] is string && request.resource.data.votes[me()] != me())))
           || (changed().hasOnly(['confirms'])
               && request.resource.data.get('confirms', {}).diff(resource.data.get('confirms', {})).affectedKeys().hasOnly([me()])
               && (!(me() in request.resource.data.get('confirms', {})) || request.resource.data.confirms[me()] == resource.data.get('resultRev', 0))));

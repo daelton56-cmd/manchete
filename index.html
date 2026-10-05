@@ -885,7 +885,8 @@ function cleanGame(id, d) {
     vis: d.vis === 'privada' ? 'privada' : 'turma',
     allowed: ids(d.allowed),
     resultRev: Math.max(0, Math.round(numOr(d.resultRev, 0))),
-    confirms: (() => { const o = {}; if (d.confirms && typeof d.confirms === 'object') for (const [k, v] of Object.entries(d.confirms)) if (typeof v === 'number') o[k] = v; return o; })()
+    confirms: (() => { const o = {}; if (d.confirms && typeof d.confirms === 'object') for (const [k, v] of Object.entries(d.confirms)) if (typeof v === 'number') o[k] = v; return o; })(),
+    votes: (() => { const o = {}; if (d.votes && typeof d.votes === 'object') for (const [k, v] of Object.entries(d.votes)) if (typeof v === 'string' && v !== k) o[k] = v; return o; })()
   };
   const idxMap = o => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && v >= 0 && v <= 60) r[k] = Math.round(v); return r; };
   g.join = idxMap(d.join); g.leave = idxMap(d.leave);
@@ -915,6 +916,20 @@ function canConfirm(g) {
   const me = meId(), ct = teamOfId(g, g.createdBy);
   return me !== g.createdBy && accountIds(g).includes(me) && (ct < 0 || teamOfId(g, me) !== ct) && (g.confirms || {})[me] !== (g.resultRev || 0);
 }
+// MVP da galera: quem jogou e tem conta vota em alguém da partida. Fecha 2 dias depois do jogo ou quando todos votarem.
+const voteCloseDate = g => addDays(g.date, 2);
+const voters = g => accountIds(g);
+const validVotes = g => { const vs = voters(g), ps = teamIds(g); return Object.entries(g.votes || {}).filter(([u, p]) => vs.includes(u) && p !== u && ps.includes(p)); };
+function voteOpen(g) { return FBM() && hasResult(g) && voters(g).length >= 2 && todayStr() <= voteCloseDate(g) && validVotes(g).length < voters(g).length; }
+const canVote = g => voteOpen(g) && voters(g).includes(meId());
+const needsMyVote = g => canVote(g) && !(g.votes || {})[meId()];
+function voteTally(g) { const c = {}; for (const [, p] of validVotes(g)) c[p] = (c[p] || 0) + 1; return c; }
+function galeraMvp(g) {
+  if (!FBM() || !hasResult(g) || voteOpen(g)) return [];
+  const t = voteTally(g), max = Math.max(0, ...Object.values(t));
+  return max ? Object.keys(t).filter(k => t[k] === max) : [];
+}
+function galeraMvpCount(pid) { let n = 0; for (const g of Object.values(S.games)) if (gameVisible(g) && galeraMvp(g).includes(pid)) n++; return n; }
 const pendingConfirm = g => FBM() && hasResult(g) && needsConfirm(g) && !gameCounts(g);
 function D() {
   if (!DER || DER_DIRTY) {
@@ -1254,7 +1269,11 @@ function latestResult() {
   }
   return best;
 }
-function mvpId() { const g = latestResult(); const m = g && resultOf(g).mvp; return m && P(m) ? m : null; }
+function mvpId() {
+  const g = latestResult(); if (!g) return null;
+  const gw = galeraMvp(g).filter(P); if (gw.length) return gw[0];
+  const m = resultOf(g).mvp; return m && P(m) ? m : null;
+}
 function scoreline(g) {
   const T = (g.teams || []).length;
   if (!T) return null;
@@ -1298,7 +1317,7 @@ function gameRow(g) {
   const sl = res || pendingConfirm(g) ? scoreline(g) : null;
   const mvp = res && res.mvp && P(res.mvp) ? nameOf(res.mvp) : null;
   const past = g.date < todayStr();
-  const pill = canConfirm(g) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Confirme o placar</span>' : pendingConfirm(g) ? '<span class="pill">Falta confirmar</span>' : g.status === 'encerrado' ? '<span class="pill pill-done">Encerrado</span>' : res ? '<span class="pill">Placar lançado</span>' : (past ? '<span class="pill">Sem placar</span>' : `<span class="pill">${plural(g.conf.filter(P).length, 'confirmado', 'confirmados')}</span>`);
+  const pill = canConfirm(g) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Confirme o placar</span>' : needsMyVote(g) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Vote no MVP</span>' : pendingConfirm(g) ? '<span class="pill">Falta confirmar</span>' : g.status === 'encerrado' ? '<span class="pill pill-done">Encerrado</span>' : res ? '<span class="pill">Placar lançado</span>' : (past ? '<span class="pill">Sem placar</span>' : `<span class="pill">${plural(g.conf.filter(P).length, 'confirmado', 'confirmados')}</span>`);
   const sub = (g.vis === 'privada' && FBM() ? 'Privada. ' : '') + (sl ? esc(sl) + (mvp ? `<br>MVP: ${esc(mvp)}` : '') : esc(g.place || 'Local a definir'));
   return `<button class="item" data-act="openGame" data-id="${esc(g.id)}">
     <div class="date-box"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></div>
@@ -1391,14 +1410,19 @@ function noTurmaView() {
   <div class="err" role="alert" id="tErr"></div>
   <div style="margin-top:18px"><button class="btn btn-block btn-ghost" data-act="signOut">Sair da conta</button></div>`;
 }
+function voteBanner(g) {
+  return `<div class="banner" style="border:1px solid var(--ball);background:transparent;flex-wrap:wrap;margin-top:12px"><span class="spacer">Vote no MVP da galera do jogo de ${esc(fmtDay(g.date).toLowerCase())}.</span><button class="btn btn-sm btn-ball" data-act="openVote" data-id="${esc(g.id)}">Votar</button></div>`;
+}
 function agendaView() {
   const t = todayStr();
   const all = Object.values(S.games).filter(gameVisible);
   const up = all.filter(g => g.status !== 'encerrado' && g.date >= t).sort(byDate);
+  const toVote = all.filter(needsMyVote).sort(byDate).reverse()[0];
   const past = all.filter(g => !(g.status !== 'encerrado' && g.date >= t)).sort((a, b) => byDate(b, a));
   let h = banners();
   if (up[0]) h += heroHTML(up[0]);
-  else h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${canCreate() ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
+  if (toVote) h += voteBanner(toVote);
+  if (!up[0]) h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${canCreate() ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
   if (up.length > 1) h += section('Próximos', listBox(up.slice(1).map(gameRow)));
   if (canCreate() && up[0]) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="newGame">${ICON.plus}Marcar outro jogo</button></div>`;
   if (past.length) h += section('Anteriores', listBox(past.slice(0, 40).map(gameRow)));
@@ -1418,7 +1442,7 @@ function heroHTML(g) {
     <div class="board-when"><div class="board-day">${DIAS[d.getDay()]}<br>${d.getDate()} de ${MESES[d.getMonth()]}</div><div class="board-time">${fmtTime(g.time)}</div></div>
     <div class="board-place">${esc(g.place || 'Local a definir')}</div>
     <div class="conf-line">${conf.length ? `<div class="stack">${conf.slice(0, 7).map(id => avatar(P(id))).join('')}</div>` : ''}<span>${confTxt}</span></div>
-    ${hasResult(g) ? `<div class="board-place" style="margin:0 0 12px;color:var(--board-ink)"><b>${esc(scoreline(g) || '')}</b>. ${canConfirm(g) ? 'Confere e confirma o placar?' : pendingConfirm(g) ? 'Falta confirmar o placar.' : 'Placar lançado.'}</div>
+    ${hasResult(g) ? `<div class="board-place" style="margin:0 0 12px;color:var(--board-ink)"><b>${esc(scoreline(g) || '')}</b>. ${canConfirm(g) ? 'Confere e confirma o placar?' : pendingConfirm(g) ? 'Falta confirmar o placar.' : needsMyVote(g) ? 'Placar lançado. Vote no MVP da galera.' : 'Placar lançado.'}</div>
       <div style="display:grid;grid-template-columns:${canConfirm(g) ? '1fr 1fr' : '1fr'};gap:10px">${canConfirm(g) ? `<button class="btn" data-act="confirmScore" data-id="${esc(g.id)}">Confirmar placar</button>` : ''}<button class="btn ${canConfirm(g) ? 'board-ghost' : ''}" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button></div>`
     : FB() && S.players[meId()] && canJoinGame(g) ? (g.conf.includes(meId())
       ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><button class="btn board-ghost" data-act="heroPres" data-id="${esc(g.id)}">Desmarcar</button><button class="btn" data-act="openGame" data-id="${esc(g.id)}">Abrir jogo</button></div><div class="board-place" style="margin:10px 0 0">${myState}</div>`
@@ -1451,7 +1475,9 @@ function rankingView() {
   if (!ps.length) return banners() + `<div class="empty" style="margin-top:16px"><h3>Ranking vazio</h3><p class="sub">O ranking aparece quando o elenco tiver jogadores.</p></div>`;
   const pct = p => p.tot.sets ? p.tot.setsV / p.tot.sets : -1;
   const avg = p => p.tot.notaN ? p.tot.notaSum / p.tot.notaN : -1;
-  const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), vit: (a, b) => pct(b) - pct(a) || b.tot.sets - a.tot.sets, nota: (a, b) => avg(b) - avg(a), pres: (a, b) => b.tot.jogos - a.tot.jogos || ovrOf(b) - ovrOf(a) };
+  const gm = {}; if (FBM()) for (const p of ps) gm[p.id] = galeraMvpCount(p.id);
+  const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), vit: (a, b) => pct(b) - pct(a) || b.tot.sets - a.tot.sets, nota: (a, b) => avg(b) - avg(a), pres: (a, b) => b.tot.jogos - a.tot.jogos || ovrOf(b) - ovrOf(a), galera: (a, b) => (gm[b.id] || 0) - (gm[a.id] || 0) || ovrOf(b) - ovrOf(a) };
+  const galeraCol = S.ui.rankSort === 'galera' && FBM();
   ps.sort(sorters[S.ui.rankSort] || sorters.ovr);
   const chip = (k, l) => `<button class="chip" data-act="rankSort" data-sort="${k}" aria-pressed="${S.ui.rankSort === k}">${l}</button>`;
   const rows = ps.map((p, i) => `<tr>
@@ -1459,11 +1485,11 @@ function rankingView() {
     <td><span class="num">${ovrOf(p)}</span></td>
     <td>${p.tot.jogos}</td>
     <td>${p.tot.sets ? Math.round(pct(p) * 100) + '%' : '–'}</td>
-    <td>${p.tot.notaN ? fmtN(avg(p)) : '–'}</td>
+    <td>${galeraCol ? `<span class="num">${gm[p.id] || 0}</span>` : (p.tot.notaN ? fmtN(avg(p)) : '–')}</td>
   </tr>`).join('');
-  return banners() + `<div class="row-wrap" style="margin:16px 0 12px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Nota')}${chip('pres', 'Presença')}</div>
-  <div class="tbl-wrap"><table class="rank-tbl"><thead><tr><th>Jogador</th><th>Geral</th><th>Jogos</th><th>Vit.</th><th>Nota</th></tr></thead><tbody>${rows}</tbody></table></div>
-  <p class="sub small" style="margin-top:10px">Vit. é a porcentagem de sets vencidos. Nota é a média das notas de 0 a 10 dos jogos com placar.</p>`;
+  return banners() + `<div class="row-wrap" style="margin:16px 0 12px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Nota')}${chip('pres', 'Presença')}${FBM() ? chip('galera', 'MVP da galera') : ''}</div>
+  <div class="tbl-wrap"><table class="rank-tbl"><thead><tr><th>Jogador</th><th>Geral</th><th>Jogos</th><th>Vit.</th><th>${galeraCol ? 'MVPs' : 'Nota'}</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="sub small" style="margin-top:10px">Vit. é a porcentagem de sets vencidos. ${galeraCol ? 'MVPs é quantas vezes a galera votou no jogador como melhor da partida.' : 'Nota é a média das notas de 0 a 10 dos jogos com placar.'}</p>`;
 }
 
 // ---------- Jogo ----------
@@ -1608,6 +1634,7 @@ function placarStep(g) {
   if (W) h += `<div style="margin-top:10px"><button class="btn btn-block" data-act="addSet">${ICON.plus}Adicionar set</button></div>`;
   h += `<div class="total" id="setTotal">${esc(scoreline(g) || '')}</div>`;
   if (W) h += `<div style="margin-top:8px"><button class="btn btn-block btn-ball" data-act="preview">Ver relatório e encerrar</button></div>`;
+  h += votingHTML(g);
   return h;
 }
 
@@ -1630,7 +1657,7 @@ function reportBody(rows, mvp, awards, ctx) {
   let h = '';
   if (mvp && P(mvp) && rows[mvp]) {
     const p = { ...P(mvp), at: rows[mvp].atAfter, forma: rows[mvp].formaAfter, last: { g: '', d: rows[mvp].ovrAfter - rows[mvp].ovrBefore } };
-    h += `<div class="mvp" style="margin:6px 0 4px">${cardHTML(p, { destaque: true })}<div><div class="sub">MVP da rodada</div><div class="game-title" style="font-size:30px">${esc(nameOf(mvp))}</div><div class="sub">Nota <b class="num" style="font-size:22px;color:var(--ink)">${fmtN(rows[mvp].nota)}</b></div></div></div>`;
+    h += `<div class="mvp" style="margin:6px 0 4px">${cardHTML(p, { destaque: true })}<div><div class="sub">${FBM() ? 'MVP pelos números' : 'MVP da rodada'}</div><div class="game-title" style="font-size:30px">${esc(nameOf(mvp))}</div><div class="sub">Nota <b class="num" style="font-size:22px;color:var(--ink)">${fmtN(rows[mvp].nota)}</b></div></div></div>`;
   }
   const aw = (awards || []).filter(a => a.key !== 'mvp' && P(a.pid));
   if (aw.length) h += section('Prêmios', `<div class="awards">${aw.map(a => `<div class="award"><div class="item-main"><b>${esc(a.name)}</b><div class="sub">${esc(nameOf(a.pid))}</div></div><span class="num" style="font-size:22px">${a.key === 'evoluiu' ? '+' + fmtN(a.val) : a.val}</span><span class="sub small">${esc(a.unit)}</span></div>`).join('')}</div>`);
@@ -1647,6 +1674,31 @@ function reportBody(rows, mvp, awards, ctx) {
   })), `<p class="sub small" style="margin:-4px 0 10px">Nota de 0 a 10 pelo que foi anotado e pelos sets vencidos. Toque num jogador para ver por que a carta mudou.</p>`);
   return h;
 }
+function votingHTML(g) {
+  if (!FBM() || !hasResult(g) || voters(g).length < 2) return '';
+  const vs = voters(g), nVoted = validVotes(g).length;
+  const closeTxt = `A votação fecha ${fmtDay(voteCloseDate(g)).toLowerCase()} à noite, ou antes, quando todo mundo votar.`;
+  let body = '';
+  if (voteOpen(g)) {
+    if (!vs.includes(meId())) body = `<p class="sub">${nVoted} de ${vs.length} já votaram. Só vota quem jogou e tem conta. ${closeTxt}</p>`;
+    else {
+      const mine = (g.votes || {})[meId()];
+      const cands = teamIds(g).filter(id => id !== meId() && P(id)).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'pt-BR'));
+      body = `<p class="sub" style="margin:-4px 0 10px">${mine ? `Você votou em <b>${esc(nameOf(mine))}</b>. Dá para trocar até a votação fechar.` : 'Quem jogou mais nessa partida? O resultado só aparece quando a votação fechar.'} ${nVoted} de ${vs.length} já votaram.</p>`
+        + listBox(cands.map(id => { const p = P(id), on = mine === id; return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)}${teamOfId(g, id) >= 0 ? `, time ${TEAMS[teamOfId(g, id)].name.toLowerCase()}` : ''}</div></div><button class="toggle" data-act="vote" data-id="${esc(g.id)}" data-pid="${esc(id)}" aria-pressed="${on}">${on ? 'Seu voto' : 'Votar'}</button></div>`; }))
+        + `<p class="sub small" style="margin-top:8px">${closeTxt}</p>`;
+    }
+  } else {
+    const t = voteTally(g), w = galeraMvp(g).filter(P);
+    if (!w.length) body = `<p class="sub">Ninguém votou nessa partida.</p>`;
+    else {
+      const top = Object.entries(t).filter(([p]) => P(p)).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      body = `<div class="mvp" style="margin:4px 0 10px">${cardHTML(P(w[0]), { destaque: true })}<div><div class="sub">${w.length > 1 ? 'Empate no MVP da galera' : 'MVP da galera'}</div><div class="game-title" style="font-size:30px">${w.map(id => esc(nameOf(id))).join(' e ')}</div><div class="sub">${t[w[0]]} de ${nVoted} ${nVoted === 1 ? 'voto' : 'votos'}</div></div></div>`
+        + (top.length > 1 ? listBox(top.map(([p, n], i) => `<div class="pres"><span class="num" style="width:22px;color:var(--muted)">${i + 1}</span>${avatar(P(p))}<div class="item-main"><div class="item-title">${esc(nameOf(p))}</div></div><span class="num">${n}</span><span class="sub small">${n === 1 ? 'voto' : 'votos'}</span></div>`)) : '');
+    }
+  }
+  return `<div id="votacao">${section('MVP da galera', body)}</div>`;
+}
 function finalView(g) {
   const pend = pendingConfirm(g);
   const res = resultOf(g) || (pend && hasResult(g) ? computeResult(g, D().view) : null) || { players: {}, awards: [], mvp: null };
@@ -1655,6 +1707,7 @@ function finalView(g) {
   h += `<div class="board" style="padding:16px"><div class="board-label">Resultado</div><div class="board-day" style="font-size:30px;margin-top:4px">${esc(scoreline(g) || 'Sem placar')}</div>
     <div class="board-place" style="margin:6px 0 0">${g.sets.filter(s => s.pa != null && s.pb != null).map(s => `${s.pa}–${s.pb}`).join(', ')}</div></div>`;
   if (pend) h += `<p class="sub small" style="margin-top:12px">Prévia: é assim que as cartas vão ficar quando o placar valer.</p>`;
+  h += votingHTML(g);
   h += reportBody(rows, res.mvp, res.awards, 'final');
   if (g.teams) h += section('Times', `<div class="teams">${g.teams.map((t, i) => `<div class="team"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span></div>${t.map(id => `<div class="tp"><span class="tp-name">${esc(nameOf(id))}</span><span class="tp-ovr">${rows[id] ? rows[id].ovrAfter : ''}</span></div>`).join('')}</div>`).join('')}</div>`, `<p class="sub small" style="margin:-4px 0 10px">Geral de cada um logo depois deste jogo.</p>`);
   h += `<div class="row-wrap" style="margin-top:16px"><button class="btn btn-sm" data-act="copyResult">${ICON.copy}Copiar resultado</button></div>`;
@@ -1981,7 +2034,7 @@ function playerHTML(p) {
   }
   if (p.calib || p.level) h += `<p class="sub small" style="text-align:center">${p.level ? `Entrou como ${LEVELS[p.level].name.toLowerCase()}. ` : ''}${p.calib ? `Em calibração: ${CALIB.length - p.n === 1 ? 'falta 1 jogo' : `faltam ${CALIB.length - p.n} jogos`} para a carta firmar, e até lá ela anda mais rápido.` : ''}</p>`;
   if (hist.length >= 2) h += section('Evolução', `<div class="list" style="padding:10px 12px">${spark(hist)}<div class="row sub small"><span>${hist[0]}</span><span class="spacer"></span><span>${plural(hist.length - 1, 'jogo', 'jogos')}</span><span class="spacer"></span><span>${hist[hist.length - 1]}</span></div></div>`);
-  h += section('Na temporada', `<div class="stats">${stat(t.jogos, 'Jogos')}${stat(t.sets ? Math.round(100 * t.setsV / t.sets) + '%' : '–', 'Sets ganhos')}${stat(t.notaN ? fmtN(t.notaSum / t.notaN) : '–', 'Nota média')}${stat(t.mvp, 'MVPs')}${stat(t.ace, 'Aces')}${stat(t.es, 'Erros de saque')}${stat(t.ep, 'Erros de passe')}${stat(t.ap, 'Pontos de ataque')}${stat(t.bl, 'Bloqueios')}${stat(t.df, 'Defesas')}${stat(t.ea, 'Erros de ataque')}${stat(t.el, 'Erros de toque')}</div>`);
+  h += section('Na temporada', `<div class="stats">${stat(t.jogos, 'Jogos')}${stat(t.sets ? Math.round(100 * t.setsV / t.sets) + '%' : '–', 'Sets ganhos')}${stat(t.notaN ? fmtN(t.notaSum / t.notaN) : '–', 'Nota média')}${stat(t.mvp, FBM() ? 'MVPs pelos números' : 'MVPs')}${FBM() ? stat(galeraMvpCount(p.id), 'MVPs da galera') : ''}${stat(t.ace, 'Aces')}${stat(t.es, 'Erros de saque')}${stat(t.ep, 'Erros de passe')}${stat(t.ap, 'Pontos de ataque')}${stat(t.bl, 'Bloqueios')}${stat(t.df, 'Defesas')}${stat(t.ea, 'Erros de ataque')}${stat(t.el, 'Erros de toque')}</div>`);
   if (canEditPlayer(p)) h += `<div style="margin-top:16px"><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(p.id)}">${p.id === meId() ? 'Editar minha carta' : 'Editar jogador'}</button></div>`;
   return h;
 }
@@ -2428,6 +2481,20 @@ const ACT = {
     if (g.conf.includes(id)) { g.conf = g.conf.filter(x => x !== id); g.paid = g.paid.filter(x => x !== id); }
     else g.conf.push(id);
     persist('games', g.id); render();
+  },
+  vote: el => {
+    const g = S.games[el.dataset.id], pid = el.dataset.pid;
+    if (!g || !pid || !canVote(g) || pid === meId() || !teamIds(g).includes(pid)) return;
+    const prev = (g.votes || {})[meId()];
+    g.votes = Object.assign({}, g.votes, { [meId()]: pid }); render();
+    S.db.vote(g.id, meId(), pid)
+      .then(() => toast(prev ? `Voto trocado para ${nameOf(pid)}.` : `Voto em ${nameOf(pid)} registrado.`))
+      .catch(e => { toast(e && e.code === 'permission-denied' ? 'Só vota quem jogou essa partida.' : 'Não consegui registrar o voto. Tente de novo.'); resync(); });
+  },
+  openVote: el => {
+    const g = S.games[el.dataset.id]; if (!g) return;
+    S.ui.gameId = g.id; S.ui.step = 'placar'; render();
+    setTimeout(() => { const v = $('#votacao'); if (v) v.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }, 60);
   },
   confirmScore: el => {
     const g = S.games[el.dataset.id]; if (!g || !canConfirm(g)) return;
@@ -2879,7 +2946,7 @@ window.MCloud = {
           // Partida: a presença (conf) nunca é sobrescrita aqui, só muda por presence/setConf.
           set: data => {
             if (kind !== 'games') return guard(setDoc(ref, data));
-            const d = { ...data }; delete d.conf; delete d.confirms;
+            const d = { ...data }; delete d.conf; delete d.confirms; delete d.votes;
             return guard(setDoc(ref, d, { mergeFields: Object.keys(d) }));
           },
           delete: () => guard(deleteDoc(ref))
@@ -2889,6 +2956,8 @@ window.MCloud = {
       setConf: (gid, conf) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { conf })),
       // Confirmação do placar: cada um só grava a própria, presa à versão atual do placar.
       confirm: (gid, uid, rev) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { [`confirms.${uid}`]: rev })),
+      // Voto no MVP da galera: cada um grava só o próprio voto.
+      vote: (gid, uid, pid) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { [`votes.${uid}`]: pid })),
       // Trava das notas iniciais depois do primeiro jogo que vale.
       lockCard: pid => guard(updateDoc(doc(fs, 'turmas', t, 'players', pid), { locked: true })),
       // Foto grande fica separada da carta e só é baixada quando alguém abre a foto.
