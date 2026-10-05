@@ -276,6 +276,19 @@ td .num{font-size:18px}
 .tour-up{display:flex; align-items:center; gap:10px; justify-content:center; font-weight:600}
 .tour-up .delta{font-size:20px}
 @media (prefers-reduced-motion:reduce){.tour-dots i{transition:none}}
+.icon-btn.bell{position:relative}
+.badge{position:absolute; top:-4px; right:-4px; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:var(--ball); color:var(--ball-ink); font-size:11px; font-weight:800; display:grid; place-items:center; line-height:1}
+.sug-row{display:flex; gap:10px; overflow-x:auto; scroll-snap-type:x mandatory; padding:2px 2px 8px; margin:0 -2px; scrollbar-width:none}
+.sug-row::-webkit-scrollbar{display:none}
+.sug{position:relative; flex:0 0 150px; scroll-snap-align:start; background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:16px 10px 12px; display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center}
+.sug-av .av{width:64px; height:64px; font-size:22px}
+.sug-av{padding:0; border-radius:50%}
+.sug-name{font-weight:700; font-size:15px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sug-why{font-size:12px; color:var(--muted); min-height:30px; line-height:1.25}
+.sug-x{position:absolute; top:6px; right:6px; width:28px; height:28px; display:grid; place-items:center; color:var(--muted); border-radius:50%}
+.sug-x svg{width:14px; height:14px}
+.card-cell{display:flex; flex-direction:column; gap:6px; min-width:0}
+.card-meta{display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center}
 .zoom-bg{position:fixed; inset:0; z-index:80; background:rgba(4,12,26,.94); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:calc(env(safe-area-inset-top,0px) + 56px) 16px calc(env(safe-area-inset-bottom,0px) + 24px)}
 .zoom-bg img{max-width:100%; max-height:72vh; border-radius:18px; object-fit:contain; box-shadow:0 0 0 3px var(--ball)}
 .zoom-cap{color:#F3F6FB; font-family:var(--display); font-weight:800; font-size:30px; margin-top:14px}
@@ -799,6 +812,7 @@ const ICON = {
   podium: svg('<path d="M3 20h18M5 20v-6h4v6M10 20V8h4v12M15 20v-9h4v9"/>'),
   back: svg('<path d="M15 18l-6-6 6-6"/>'),
   chev: svg('<path d="M9 6l6 6-6 6"/>'),
+  bell: svg('<path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>'),
   help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.2-1 .7-1 1.3v.6M12 17v.2"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   x: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
@@ -822,7 +836,8 @@ const S = {
   players: {}, games: {},
   ui: { tab: 'jogos', gameId: null, step: null, selP: null, swapSel: null, sort: 'ovr', rankSort: 'ovr', openRep: null, flash: '', sheet: null, form: null, pendingRender: false },
   migrateOffer: false,
-  me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false
+  me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false,
+  friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
 };
 const FBM = () => !!window.MANCHETE_FIREBASE;
 const FB = () => FBM() && S.mode === 'cloud' && !!S.me && !!S.turmaId;
@@ -882,7 +897,7 @@ function cleanGame(id, d) {
     log: Array.isArray(d.log) ? d.log.filter(e => e && typeof e.p === 'string' && EVENTS[e.e]).slice(-3000).map(e => ({ p: e.p, e: e.e, t: numOr(e.t, 0) })) : [],
     created: numOr(d.created, 0), finishedAt: numOr(d.finishedAt, 0),
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : null,
-    vis: d.vis === 'privada' ? 'privada' : 'turma',
+    vis: ['privada', 'amigos'].includes(d.vis) ? d.vis : 'turma',
     allowed: ids(d.allowed),
     resultRev: Math.max(0, Math.round(numOr(d.resultRev, 0))),
     confirms: (() => { const o = {}; if (d.confirms && typeof d.confirms === 'object') for (const [k, v] of Object.entries(d.confirms)) if (typeof v === 'number') o[k] = v; return o; })(),
@@ -936,7 +951,16 @@ function D() {
     const raw = Object.values(S.players);
     const r = replay(raw, Object.values(S.games).filter(gameCounts));
     const view = {};
-    for (const p of raw) { const c = r.cards[p.id]; view[p.id] = Object.assign({}, p, { at: c.at, forma: c.forma, n: c.n, tot: c.tot, hist: c.hist, last: c.last, calib: c.calib }); }
+    for (const p of raw) {
+      const c = r.cards[p.id];
+      view[p.id] = Object.assign({}, p, { at: c.at, forma: c.forma, n: c.n, tot: c.tot, hist: c.hist, last: c.last, calib: c.calib });
+      if (FBM()) {
+        const pi = personalOf(p.id), v = view[p.id];
+        if (pi) { v.name = pi.name || v.name; v.nick = pi.nick != null ? pi.nick : v.nick; v.photo = pi.photo || (privacyOn() ? '' : v.photo); if (pi.height !== undefined) v.height = pi.height; if (pi.birthYear !== undefined) v.birthYear = pi.birthYear; }
+        v.known = !!pi || (!!p.name && !privacyOn());
+        if (!v.name) v.name = 'Jogador';
+      }
+    }
     DER = { view, results: r.results };
     DER_DIRTY = false;
   }
@@ -998,7 +1022,9 @@ async function flush(key) {
   const obj = S[kind][id];
   try {
     const ref = S.db.doc(key);
-    if (obj) await ref.set(clone(obj)); else await ref.delete();
+    const data = obj ? clone(obj) : null;
+    if (data && kind === 'players' && privacyOn()) for (const f of PERSONAL) delete data[f];
+    if (data) await ref.set(data); else await ref.delete();
     st.tries = 0;
     const cbs = st.after || []; st.after = [];
     for (const f of cbs) { try { f(); } catch (er) { } }
@@ -1094,7 +1120,8 @@ function subscribe() {
         if (FB() && !S.players[meId()]) setTimeout(() => { if (FB() && !S.players[meId()] && !S.ui.sheet) ACT.newSelf(); }, 60);
       }
       if (got.players && got.games && S.mode === 'cloud') upgradeData();
-      if (firm.players && firm.games) checkMigration();
+      if (firm.players && firm.games) { checkMigration(); runPrivacyMigration(); }
+      syncSocial();
       if (S.mode === 'cloud') render();
     }, err => {
       if (FBM() && err && err.code === 'permission-denied') return lostTurma();
@@ -1150,10 +1177,10 @@ function parseInvite(text) {
   const m = String(text || '').match(/[?&]t=([\w-]{6,40}).*?[?&]c=([\w-]{4,40})/) || String(text || '').match(/[?&]c=([\w-]{4,40}).*?[?&]t=([\w-]{6,40})/);
   if (!m) return null;
   const t = /[?&]t=([\w-]+)/.exec(text)[1], c = /[?&]c=([\w-]+)/.exec(text)[1];
-  const n = /[?&]n=([^&#]*)/.exec(text), gm = /[?&]g=([\w-]{4,60})/.exec(text);
+  const n = /[?&]n=([^&#]*)/.exec(text), gm = /[?&]g=([\w-]{4,60})/.exec(text), bm = /[?&]by=([\w-]{6,60})/.exec(text);
   let name = '';
   try { name = n ? decodeURIComponent(n[1].replace(/\+/g, ' ')).slice(0, 40) : ''; } catch (e) { }
-  return { t, c, n: name, g: gm ? gm[1] : '' };
+  return { t, c, n: name, g: gm ? gm[1] : '', by: bm ? bm[1] : '' };
 }
 function readInvite() {
   const fromUrl = parseInvite(location.search);
@@ -1163,11 +1190,15 @@ function readInvite() {
 function clearInvite() { try { localStorage.removeItem(LS_INVITE); } catch (e) { } }
 function inviteLink(gid) {
   if (!S.turma) return '';
-  return `${location.origin}${location.pathname}?t=${encodeURIComponent(S.turmaId)}&c=${encodeURIComponent(S.turma.inviteCode)}&n=${encodeURIComponent(S.turma.name || '')}${gid ? '&g=' + encodeURIComponent(gid) : ''}`;
+  const personal = S.myToken && meId();
+  return `${location.origin}${location.pathname}?t=${encodeURIComponent(S.turmaId)}&c=${encodeURIComponent(personal ? S.myToken : S.turma.inviteCode)}${personal ? '&by=' + encodeURIComponent(meId()) : ''}&n=${encodeURIComponent(S.turma.name || '')}${gid ? '&g=' + encodeURIComponent(gid) : ''}`;
 }
 const standalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
-function stopListening() { for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } } }
-function resetData() { S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
+function stopListening() {
+  for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } }
+  for (const m of [S.social.profiles, S.social.rosters]) { for (const off of m.values()) { try { off(); } catch (e) { } } m.clear(); }
+}
+function resetData() { S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.myToken = ''; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
 function bootFirebase() {
   S.mode = 'auth-wait'; S.invite = readInvite(); render();
   const go = () => { if (S.authOff) return; S.authOff = window.MCloud.onAuth(u => onAuthChange(u)); };
@@ -1183,11 +1214,16 @@ async function onAuthChange(u) {
   const ud = await window.MCloud.getUser(u.uid).catch(() => null);
   if (S.pendingName) S.me.name = S.pendingName; else if (ud && ud.name) S.me.name = ud.name;
   S.userTourDone = !!(ud && ud.tourDone);
+  S.notifSeenCloud = (ud && ud.notifSeen) || 0;
   S.pendingName = '';
   let t = null;
   const inv = S.invite || readInvite();
   if (inv) {
-    try { await window.MCloud.joinTurma(inv.t, inv.c, S.me); t = inv.t; S.joined = true; if (inv.g) S.openGameId = inv.g; }
+    try {
+      const fresh = await window.MCloud.joinTurma(inv.t, inv.c, S.me, inv.by || '');
+      t = inv.t; S.joined = true; if (inv.g) S.openGameId = inv.g;
+      if (fresh) S.pendingAutoFriend = { by: inv.by || '', k: inv.c };
+    }
     catch (e) { S.authMsg = 'Esse convite não vale mais. Peça um link novo para quem te chamou.'; }
     S.invite = null; clearInvite();
   }
@@ -1200,7 +1236,12 @@ function openTurma(t) {
   S.turmaId = t; S.mode = 'loading-cloud'; S.loadErr = false; render();
   window.MCloud.setUser(S.me.uid, { lastTurma: t }).catch(() => { });
   S.db = window.MCloud.db(t);
-  S.unsubs.push(window.MCloud.watchTurma(t, d => { if (!d) return lostTurma(); S.turma = d; dirty(); render(); }, () => lostTurma()));
+  S.unsubs.push(window.MCloud.watchTurma(t, d => {
+    if (!d) return lostTurma();
+    S.turma = d; dirty(); syncSocial(); render();
+    if (S.pendingAutoFriend) runAutoFriend();
+  }, () => lostTurma()));
+  startSocial();
   S.unsubs.push(window.MCloud.watchMembers(t, list => { const m = {}; for (const x of list) if (x && x.uid) m[x.uid] = x; S.members = m; dirty(); render(); }, () => { }));
   subscribe();
   setTimeout(() => { if (S.mode === 'loading-cloud' && S.turmaId === t) { S.loadErr = true; render(); } }, 20000);
@@ -1221,9 +1262,14 @@ function lostTurma() {
 }
 function resync() { if (!FB()) return; const t = S.turmaId; stopListening(); S.unsubs = []; openTurma(t); }
 const ageOf = p => (p && p.birthYear ? new Date().getFullYear() - p.birthYear : null);
-function gameVisible(g) { if (!FBM() || !g) return true; return g.vis !== 'privada' || g.createdBy === meId() || g.allowed.includes(meId()) || isTurmaAdmin(); }
-function canJoinGame(g) { return !FBM() || g.vis !== 'privada' || g.createdBy === meId() || g.allowed.includes(meId()); }
-const invitedTo = (g, p) => !FBM() || g.vis !== 'privada' || p.guest || p.id === g.createdBy || g.allowed.includes(p.id);
+function canJoinGame(g) { if (!FBM() || !g) return true; return g.vis === 'turma' || g.createdBy === meId() || g.allowed.includes(meId()) || (g.vis === 'amigos' && isFriend(g.createdBy)); }
+function gameVisible(g) { if (!FBM() || !g) return true; return canJoinGame(g) || isTurmaAdmin(); }
+const invitedTo = (g, p) => {
+  if (!FBM() || g.vis === 'turma' || p.guest || p.id === g.createdBy || g.allowed.includes(p.id)) return true;
+  if (g.vis === 'amigos') return g.createdBy === meId() ? isFriend(p.id) : (p.id === meId() && isFriend(g.createdBy));
+  return false;
+};
+const visLabel = g => (FBM() && g.vis === 'privada' ? 'Privada' : FBM() && g.vis === 'amigos' ? 'Só amigos' : '');
 function canCreate() { return S.canWrite && (!FBM() || (FB() && !!S.players[meId()])); }
 function isTurmaAdmin() { if (!FBM()) return S.canWrite; return !!(S.turma && (S.turma.admins || []).includes(meId())); }
 function canEditGame(g) { if (!S.canWrite) return false; if (!FBM()) return true; return !!g && (g.createdBy === meId() || isTurmaAdmin()); }
@@ -1318,7 +1364,7 @@ function gameRow(g) {
   const mvp = res && res.mvp && P(res.mvp) ? nameOf(res.mvp) : null;
   const past = g.date < todayStr();
   const pill = canConfirm(g) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Confirme o placar</span>' : needsMyVote(g) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Vote no MVP</span>' : pendingConfirm(g) ? '<span class="pill">Falta confirmar</span>' : g.status === 'encerrado' ? '<span class="pill pill-done">Encerrado</span>' : res ? '<span class="pill">Placar lançado</span>' : (past ? '<span class="pill">Sem placar</span>' : `<span class="pill">${plural(g.conf.filter(P).length, 'confirmado', 'confirmados')}</span>`);
-  const sub = (g.vis === 'privada' && FBM() ? 'Privada. ' : '') + (sl ? esc(sl) + (mvp ? `<br>MVP: ${esc(mvp)}` : '') : esc(g.place || 'Local a definir'));
+  const sub = (visLabel(g) ? visLabel(g) + '. ' : '') + (sl ? esc(sl) + (mvp ? `<br>MVP: ${esc(mvp)}` : '') : esc(g.place || 'Local a definir'));
   return `<button class="item" data-act="openGame" data-id="${esc(g.id)}">
     <div class="date-box"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></div>
     <div class="item-main"><div class="item-title">${DIAS[d.getDay()]}, ${fmtTime(g.time)}</div><div class="item-sub">${sub}</div></div>
@@ -1339,7 +1385,7 @@ function render() {
   if (a && a.closest && a.closest('#view') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) { S.ui.pendingRender = true; return; }
   S.ui.pendingRender = false;
   renderTop(); renderTabs();
-  try { $('#view').innerHTML = viewHTML(); ensureLocks(); waitPromotion(); }
+  try { $('#view').innerHTML = viewHTML(); ensureLocks(); waitPromotion(); if (S.ui.gameId && FB()) ensureRoster(S.games[S.ui.gameId]); }
   catch (err) {
     console.error(err);
     $('#view').innerHTML = `<div class="empty" style="margin-top:16px"><h3>Essa tela travou</h3><p class="sub">Algum dado veio diferente do esperado. Volte para o início e tente de novo.</p><button class="btn" data-act="home">Voltar para os jogos</button></div>`;
@@ -1351,7 +1397,54 @@ function renderTop() {
   const mode = S.mode === 'local' ? 'Neste aparelho' : (S.mode === 'cloud' && !S.canWrite ? 'Só leitura' : '');
   $('#top').innerHTML = g
     ? `<button class="back" data-act="home">${ICON.back}Jogos</button><span class="spacer"></span>${canEditGame(g) ? `<button class="btn btn-sm" data-act="editGame">Editar jogo</button>` : ''}`
-    : `<div class="mark"><i aria-hidden="true"></i>Manchete</div>${mode && !FBM() ? `<div class="mode">${esc(mode)}</div>` : ''}${FBM() && !['cloud', 'no-turma'].includes(S.mode) ? '' : `<button class="icon-btn" data-act="help" aria-label="Como funciona">${ICON.help}</button>`}${FB() ? `<button class="me-btn" data-act="perfil" aria-label="Sua carta e sua turma">${P(meId()) ? avatar(P(meId())) : `<span class="av">${esc(initials({ name: S.me.name || '?' }))}</span>`}</button>` : ''}`;
+    : `<div class="mark"><i aria-hidden="true"></i>Manchete</div>${mode && !FBM() ? `<div class="mode">${esc(mode)}</div>` : ''}${FBM() && !['cloud', 'no-turma'].includes(S.mode) ? '' : `<button class="icon-btn" data-act="help" aria-label="Como funciona">${ICON.help}</button>`}${FB() ? (() => { const n = notifData().unread; return `<button class="icon-btn bell" data-act="notifs" aria-label="Notificações${n ? `, ${n} novas` : ''}">${ICON.bell}${n ? `<span class="badge">${n > 9 ? '9+' : n}</span>` : ''}</button>`; })() : ''}${FB() ? `<button class="me-btn" data-act="perfil" aria-label="Sua carta e sua turma">${P(meId()) ? avatar(P(meId())) : `<span class="av">${esc(initials({ name: S.me.name || '?' }))}</span>`}</button>` : ''}`;
+}
+const notifKey = () => 'manchete:notif:' + (meId() || 'x');
+function notifSeen() { let v = 0; try { v = Number(localStorage.getItem(notifKey()) || 0); } catch (e) { } return Math.max(v, S.notifSeenCloud || 0); }
+function notifData() {
+  const me = meId(), seen = notifSeen(), act = [], news = [];
+  if (!FB()) return { act, news, unread: 0 };
+  for (const f of Object.values(S.friendships)) {
+    const other = (f.users || []).find(x => x !== me);
+    if (!other) continue;
+    if (f.status === 'pending' && f.from !== me) act.push({ kind: 'req', uid: other, f, t: f.created || 0 });
+    else if (f.status === 'accepted' && f.via !== 'migracao' && f.acceptedAt) {
+      if (f.via === 'convite' || f.via === 'turma') { if (f.from === me) news.push({ kind: 'joined', uid: other, t: f.acceptedAt }); }
+      else if (f.from === me) news.push({ kind: 'acc', uid: other, t: f.acceptedAt });
+    }
+  }
+  const today = todayStr();
+  for (const g of Object.values(S.games)) {
+    if (!gameVisible(g)) continue;
+    if (canConfirm(g)) act.push({ kind: 'confirm', g, t: g.created || 0 });
+    if (needsMyVote(g)) act.push({ kind: 'vote', g, t: g.created || 0 });
+    if (g.createdBy !== me && g.status !== 'encerrado' && g.date >= today && g.created) news.push({ kind: g.vis === 'privada' && g.allowed.includes(me) ? 'invite' : 'game', g, uid: g.createdBy, t: g.created });
+    if (galeraMvp(g).includes(me)) news.push({ kind: 'mvp', g, t: new Date(voteCloseDate(g) + 'T23:00').getTime() });
+  }
+  news.sort((a, b) => b.t - a.t);
+  const top = news.slice(0, 20);
+  return { act, news: top, unread: act.length + top.filter(n => n.t > seen).length, seen };
+}
+function renderNotifBadge() { if (FB()) renderTop(); }
+function notifsHTML() {
+  const d = notifData(), fn = u => esc(nameOf(u));
+  let h = '';
+  const reqs = d.act.filter(a => a.kind === 'req'), todo = d.act.filter(a => a.kind !== 'req');
+  if (reqs.length) h += section('Pedidos de amizade', listBox(reqs.map(a => { const p = P(a.uid) || cleanProfile({ name: a.f.fromName, photo: a.f.fromPhoto }); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc((p && (p.nick || p.name)) || a.f.fromName || 'Alguém')}</div><div class="item-sub">quer ser seu amigo</div></div><div class="row-wrap" style="gap:6px"><button class="btn btn-sm btn-ball" data-act="friendAccept" data-uid="${esc(a.uid)}">Aceitar</button><button class="btn btn-sm btn-ghost" data-act="friendCancel" data-uid="${esc(a.uid)}" aria-label="Recusar">${ICON.x}</button></div></div>`; })));
+  if (todo.length) h += section('Para fazer', listBox(todo.map(a => `<div class="pres"><div class="item-main"><div class="item-title">${a.kind === 'confirm' ? 'Confirme o placar' : 'Vote no MVP da galera'}</div><div class="item-sub">Jogo de ${esc(fmtDay(a.g.date).toLowerCase())}</div></div><button class="btn btn-sm btn-ball" data-act="${a.kind === 'confirm' ? 'openGame' : 'openVote'}" data-id="${esc(a.g.id)}">${a.kind === 'confirm' ? 'Abrir' : 'Votar'}</button></div>`)));
+  const sug = suggestions().slice(0, 6);
+  if (sug.length) h += section('Sugestões para você', sugRow(sug));
+  const text = n => {
+    if (n.kind === 'acc') return `${fn(n.uid)} aceitou seu pedido de amizade.`;
+    if (n.kind === 'joined') return `${fn(n.uid)} entrou pelo seu convite e agora vocês são amigos.`;
+    if (n.kind === 'invite') return `${fn(n.uid)} te convidou para uma partida privada, ${esc(fmtDay(n.g.date).toLowerCase())}.`;
+    if (n.kind === 'game') return `${P(n.uid) && P(n.uid).known ? fn(n.uid) + ' marcou' : 'Marcaram'} um jogo: ${esc(fmtDay(n.g.date).toLowerCase())}, ${esc(fmtTime(n.g.time))}.`;
+    if (n.kind === 'mvp') return `Você foi o MVP da galera no jogo de ${esc(fmtDay(n.g.date).toLowerCase())}.`;
+    return '';
+  };
+  if (d.news.length) h += section('Novidades', listBox(d.news.map(n => `<div class="pres">${n.uid && P(n.uid) ? avatar(P(n.uid)) : ''}<div class="item-main"><div class="item-title" style="white-space:normal;font-weight:${n.t > d.seen ? 700 : 500}">${text(n)}</div></div>${n.g ? `<button class="btn btn-sm" data-act="openGame" data-id="${esc(n.g.id)}">Abrir</button>` : (n.uid && P(n.uid) ? `<button class="btn btn-sm" data-act="openPlayer" data-pid="${esc(n.uid)}">Ver</button>` : '')}</div>`)));
+  if (!h) h = '<div class="empty"><h3>Nada novo por aqui</h3><p class="sub">Pedidos de amizade, jogos marcados e votações aparecem aqui.</p></div>';
+  return h;
 }
 function renderTabs() {
   if (FBM() && S.mode !== 'cloud') { $('#tabs').innerHTML = ''; return; }
@@ -1432,7 +1525,7 @@ function agendaView() {
 function heroHTML(g) {
   const d = parseDate(g.date), t = todayStr();
   const conf = g.conf.filter(P);
-  const label = (g.date === t ? 'Hoje' : g.date === addDays(t, 1) ? 'Amanhã' : 'Próximo jogo') + (g.vis === 'privada' && FBM() ? ', partida privada' : '');
+  const label = (g.date === t ? 'Hoje' : g.date === addDays(t, 1) ? 'Amanhã' : 'Próximo jogo') + (visLabel(g) === 'Privada' ? ', partida privada' : visLabel(g) === 'Só amigos' ? ', só amigos' : '');
   const inList = g.max ? Math.min(conf.length, g.max) : conf.length, waiting = conf.length - inList;
   const confTxt = conf.length ? `${inList}${g.max ? ' de ' + g.max : ''} confirmados${waiting ? `, ${waiting} na espera` : ''}` : 'Ninguém confirmou ainda';
   const myPos = conf.indexOf(meId());
@@ -1451,7 +1544,78 @@ function heroHTML(g) {
   </section>`;
 }
 
+function friendBtn(id, big) {
+  if (!canFriend(id)) return '';
+  const st = friendState(id), cls = big ? 'btn btn-block' : 'btn btn-sm';
+  if (st === 'friend') return big ? '' : '<span class="pill pill-done">Amigos</span>';
+  if (st === 'sent') return `<button class="${cls}" data-act="friendCancel" data-uid="${esc(id)}" aria-pressed="true">Pedido enviado</button>`;
+  if (st === 'received') return `<button class="${cls} btn-ball" data-act="friendAccept" data-uid="${esc(id)}">Aceitar${big ? ' o pedido de amizade' : ''}</button>`;
+  return `<button class="${cls}${big ? ' btn-ball' : ''}" data-act="friendAdd" data-uid="${esc(id)}">${big ? 'Adicionar amigo' : 'Adicionar'}</button>`;
+}
+function suggestions() {
+  if (!FB() || !privacyOn()) return [];
+  const me = meId(), cand = new Map();
+  let hidden = {}; try { hidden = JSON.parse(localStorage.getItem('manchete:sugx:' + me) || '{}'); } catch (e) { }
+  const add = (id, kind, v) => {
+    if (id === me || hidden[id] || !canFriend(id) || friendState(id) !== 'none') return;
+    const c = cand.get(id) || { id, games: 0, via: [] };
+    if (kind === 'g') c.games += 1; else if (!c.via.includes(v)) c.via.push(v);
+    cand.set(id, c);
+  };
+  for (const g of Object.values(S.games)) if (hasResult(g) && teamIds(g).includes(me)) for (const id of teamIds(g)) add(id, 'g');
+  for (const [f, list] of Object.entries(S.fofMirrors)) if (isFriend(f)) for (const id of Object.keys(list || {})) add(id, 'v', f);
+  return [...cand.values()].map(c => Object.assign(c, { score: c.games * 3 + c.via.length * 2 })).sort((a, b) => b.score - a.score).slice(0, 10);
+}
+function sugReason(c) {
+  const fn = u => String(nameOf(u) || '').split(' ')[0];
+  const parts = [];
+  if (c.via.length) parts.push(c.via.length === 1 ? `Amigo de ${fn(c.via[0])}` : `Amigo de ${fn(c.via[0])} e mais ${c.via.length - 1}`);
+  if (c.games) parts.push(c.via.length ? `jogaram ${c.games === 1 ? '1 vez' : c.games + ' vezes'}` : `Jogaram juntos ${c.games === 1 ? '1 vez' : c.games + ' vezes'}`);
+  return parts.join(', ');
+}
+function sugTile(c) {
+  const p = P(c.id); if (!p) return '';
+  return `<div class="sug"><button class="sug-x" data-act="sugHide" data-uid="${esc(c.id)}" aria-label="Dispensar sugestão">${ICON.x}</button><button class="sug-av" data-act="openPlayer" data-pid="${esc(c.id)}" aria-label="Ver ${esc(p.nick || p.name)}">${avatar(p)}</button><div class="sug-name">${esc(p.nick || p.name)}</div><div class="sug-why">${esc(sugReason(c))}</div>${friendBtn(c.id)}</div>`;
+}
+function sugRow(list) { return list.length ? `<div class="sug-row" role="list">${list.map(sugTile).join('')}</div>` : ''; }
+function cardsGrid(ps, extra) {
+  const mvp = mvpId();
+  return `<div class="cards">${ps.map(p => `<div class="card-cell"><button class="card-btn" data-act="openPlayer" data-pid="${esc(p.id)}" aria-label="${esc(p.nick || p.name)}, geral ${ovrOf(p)}">${cardHTML(p, { destaque: p.id === mvp })}</button>${extra ? extra(p) : ''}</div>`).join('')}</div>`;
+}
+function whoPlayedHTML(g) {
+  if (!FB() || !privacyOn() || !hasResult(g)) return '';
+  const ids = teamIds(g).filter(id => id !== meId() && P(id));
+  if (!ids.length) return '';
+  return section('Quem jogou', listBox(ids.map(id => { const p = P(id), ti = teamOfId(g, id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${p.guest ? 'Convidado' : esc((POS[p.pos] || POS.cor).name)}${ti >= 0 ? `, time ${TEAMS[ti].name.toLowerCase()}` : ''}</div></div>${friendBtn(id)}</div>`; })));
+}
+function elencoSocial() {
+  const tab = S.ui.elencoTab || 'amigos', mine = P(meId());
+  let h = banners();
+  h += `<div class="seg seg-full" style="grid-template-columns:1fr 1fr;margin-top:14px" role="group" aria-label="Quem aparece"><button data-act="elencoTab" data-v="amigos" aria-pressed="${tab === 'amigos'}">Amigos</button><button data-act="elencoTab" data-v="recentes" aria-pressed="${tab === 'recentes'}">Jogou recentemente</button></div>`;
+  if (tab === 'amigos') {
+    if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${plural(friendIds().length, 'amigo', 'amigos')}</div></div></div>`;
+    const sug = suggestions();
+    if (sug.length) h += section('Sugestões para você', sugRow(sug));
+    const fr = friendIds().map(P).filter(Boolean).sort((a, b) => ovrOf(b) - ovrOf(a));
+    h += section(fr.length ? `Amigos aqui (${fr.length})` : 'Amigos aqui', fr.length ? cardsGrid(fr) : `<p class="sub">Você ainda não tem amigos nesta turma. Depois de jogar, quem jogou com você aparece em Jogou recentemente para você adicionar.</p>`);
+    const guests = Object.values(S.players).filter(p => p.guest && p.createdBy === meId()).map(p => P(p.id)).filter(Boolean);
+    if (guests.length) h += section('Seus convidados', cardsGrid(guests));
+    const outside = Object.entries(S.myMirrors).filter(([u]) => !S.players[u] && isFriend(u));
+    if (outside.length) h += section('Amigos de outras turmas', listBox(outside.map(([u, x]) => `<div class="pres">${avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">Ainda não está nesta turma</div></div><button class="btn btn-sm" data-act="shareInvite">Chamar</button></div>`)));
+    h += `<p class="sub small" style="margin-top:14px">Quem entra pelo seu link já chega como seu amigo. Amizade vale para todas as turmas.</p>`;
+  } else {
+    const list = [...coPlayers().entries()].filter(([id]) => !isFriend(id) && P(id)).sort((a, b) => b[1] - a[1]);
+    if (!list.length) h += `<div class="empty" style="margin-top:16px"><h3>Ninguém por aqui ainda</h3><p class="sub">Depois das próximas partidas, quem jogou com você aparece aqui com a carta, e dá para mandar pedido de amizade.</p></div>`;
+    else {
+      const cnt = new Map(list);
+      h += `<div style="margin-top:16px">${cardsGrid(list.map(([id]) => P(id)), p => `<div class="card-meta"><span class="sub small">${cnt.get(p.id) === 1 ? '1 jogo juntos' : cnt.get(p.id) + ' jogos juntos'}</span>${friendBtn(p.id)}</div>`)}</div>`;
+      h += `<p class="sub small" style="margin-top:14px">Considera as suas últimas 10 partidas com placar.</p>`;
+    }
+  }
+  return h;
+}
 function elencoView() {
+  if (FB() && privacyOn()) return elencoSocial();
   const mine = FB() ? P(meId()) : null;
   const ps = Object.keys(S.players).map(P).filter(p => !mine || p.id !== mine.id);
   let h = banners();
@@ -1463,15 +1627,20 @@ function elencoView() {
   ps.sort(sorters[S.ui.sort] || sorters.ovr);
   const chip = (k, l) => `<button class="chip" data-act="sort" data-sort="${k}" aria-pressed="${S.ui.sort === k}">${l}</button>`;
   const mvp = mvpId();
-  if (mine) h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">A galera</h2><button class="btn btn-sm" data-act="newGuest">${ICON.plus}Convidado</button></div>`;
+  if (mine) h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">A galera</h2></div>`;
   h += `<div class="row" style="margin:${mine ? '0' : '16px'} 0 12px"><div class="row-wrap">${chip('ovr', 'Geral')}${chip('nome', 'Nome')}${chip('pos', 'Posição')}</div><span class="spacer"></span>${FB() ? '' : (S.canWrite ? `<button class="btn btn-sm btn-ball" data-act="newPlayer">${ICON.plus}Jogador</button>` : '')}</div>`;
   h += `<div class="cards">${ps.map(p => `<button class="card-btn" data-act="openPlayer" data-pid="${esc(p.id)}" aria-label="${esc(p.name)}, geral ${ovrOf(p)}">${cardHTML(p, { destaque: p.id === mvp })}</button>`).join('')}</div>`;
-  h += `<p class="sub small" style="margin-top:14px">${plural(ps.length + (mine ? 1 : 0), 'jogador', 'jogadores')}. Toque numa carta para ver a evolução.${FB() ? ' Convidado é quem joga sem conta, e a carta dele fica com quem criou.' : ''}</p>`;
+  h += `<p class="sub small" style="margin-top:14px">${plural(ps.length + (mine ? 1 : 0), 'jogador', 'jogadores')}. Toque numa carta para ver a evolução.${FB() ? ' Convidado é quem joga sem conta: quem marca a partida cria, dentro dela, em Convidar.' : ''}</p>`;
   return h;
 }
 
 function rankingView() {
-  const ps = Object.keys(S.players).map(P);
+  let ps = Object.keys(S.players).map(P);
+  const social = FB() && privacyOn(), scope = S.ui.rankScope || 'amigos';
+  if (social) {
+    const ids = scope === 'recentes' ? new Set([meId(), ...coPlayers().keys()]) : new Set([meId(), ...friendIds(), ...Object.values(S.players).filter(p => p.guest && p.createdBy === meId()).map(p => p.id)]);
+    ps = ps.filter(p => ids.has(p.id));
+  }
   if (!ps.length) return banners() + `<div class="empty" style="margin-top:16px"><h3>Ranking vazio</h3><p class="sub">O ranking aparece quando o elenco tiver jogadores.</p></div>`;
   const pct = p => p.tot.sets ? p.tot.setsV / p.tot.sets : -1;
   const avg = p => p.tot.notaN ? p.tot.notaSum / p.tot.notaN : -1;
@@ -1487,7 +1656,7 @@ function rankingView() {
     <td>${p.tot.sets ? Math.round(pct(p) * 100) + '%' : '–'}</td>
     <td>${galeraCol ? `<span class="num">${gm[p.id] || 0}</span>` : (p.tot.notaN ? fmtN(avg(p)) : '–')}</td>
   </tr>`).join('');
-  return banners() + `<div class="row-wrap" style="margin:16px 0 12px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Nota')}${chip('pres', 'Presença')}${FBM() ? chip('galera', 'MVP da galera') : ''}</div>
+  return banners() + (social ? `<div class="seg seg-full" style="grid-template-columns:1fr 1fr;margin-top:14px" role="group" aria-label="Quem entra no ranking"><button data-act="rankScope" data-v="amigos" aria-pressed="${scope === 'amigos'}">Amigos</button><button data-act="rankScope" data-v="recentes" aria-pressed="${scope === 'recentes'}">Jogou comigo</button></div>` : '') + `<div class="row-wrap" style="margin:16px 0 12px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Nota')}${chip('pres', 'Presença')}${FBM() ? chip('galera', 'MVP da galera') : ''}</div>
   <div class="tbl-wrap"><table class="rank-tbl"><thead><tr><th>Jogador</th><th>Geral</th><th>Jogos</th><th>Vit.</th><th>${galeraCol ? 'MVPs' : 'Nota'}</th></tr></thead><tbody>${rows}</tbody></table></div>
   <p class="sub small" style="margin-top:10px">Vit. é a porcentagem de sets vencidos. ${galeraCol ? 'MVPs é quantas vezes a galera votou no jogador como melhor da partida.' : 'Nota é a média das notas de 0 a 10 dos jogos com placar.'}</p>`;
 }
@@ -1523,7 +1692,7 @@ function presencaStep(g, confN) {
   const W = canEditGame(g);
   const conf = g.conf.filter(P);
   const confSet = new Set(conf);
-  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id) && isActive(p.id) && invitedTo(g, p)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
+  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id) && isActive(p.id) && invitedTo(g, p) && (!privacyOn() || p.known)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
   const max = g.max || Infinity;
   const wait = Math.max(0, conf.length - max);
   const paid = g.paid.filter(id => confSet.has(id)).length;
@@ -1635,6 +1804,7 @@ function placarStep(g) {
   h += `<div class="total" id="setTotal">${esc(scoreline(g) || '')}</div>`;
   if (W) h += `<div style="margin-top:8px"><button class="btn btn-block btn-ball" data-act="preview">Ver relatório e encerrar</button></div>`;
   h += votingHTML(g);
+  h += whoPlayedHTML(g);
   return h;
 }
 
@@ -1708,6 +1878,7 @@ function finalView(g) {
     <div class="board-place" style="margin:6px 0 0">${g.sets.filter(s => s.pa != null && s.pb != null).map(s => `${s.pa}–${s.pb}`).join(', ')}</div></div>`;
   if (pend) h += `<p class="sub small" style="margin-top:12px">Prévia: é assim que as cartas vão ficar quando o placar valer.</p>`;
   h += votingHTML(g);
+  h += whoPlayedHTML(g);
   h += reportBody(rows, res.mvp, res.awards, 'final');
   if (g.teams) h += section('Times', `<div class="teams">${g.teams.map((t, i) => `<div class="team"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span></div>${t.map(id => `<div class="tp"><span class="tp-name">${esc(nameOf(id))}</span><span class="tp-ovr">${rows[id] ? rows[id].ovrAfter : ''}</span></div>`).join('')}</div>`).join('')}</div>`, `<p class="sub small" style="margin:-4px 0 10px">Geral de cada um logo depois deste jogo.</p>`);
   h += `<div class="row-wrap" style="margin-top:16px"><button class="btn btn-sm" data-act="copyResult">${ICON.copy}Copiar resultado</button></div>`;
@@ -1726,6 +1897,8 @@ function renderSheet() {
   else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = gameFormHTML(s.id); }
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
+  else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
+  else if (s.type === 'unfriend') { const nm = nameOf(s.uid); title = 'Desfazer amizade'; body = `<p>${esc(nm)} sai da sua aba Amigos e você sai da dele. Se vocês jogaram juntos recentemente, continuam aparecendo em Jogou recentemente.</p><div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-danger" data-act="unfriend" data-uid="${esc(s.uid)}">Desfazer amizade</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Cancelar</button></div>`; }
   else if (s.type === 'turmaName') {
     title = s.mode === 'new' ? 'Nova turma' : 'Renomear turma';
     body = `<label class="field"><span>Nome da turma</span><input class="input" id="tnName" maxlength="40" value="${esc(s.mode === 'new' ? '' : (S.turma && S.turma.name) || '')}" placeholder="Ex.: Vôlei de sábado"></label>
@@ -1745,7 +1918,7 @@ function renderSheet() {
     title = 'Apagar minha conta';
     body = S.turma && S.turma.ownerUid === meId()
       ? `<p>Você criou a turma ${esc(S.turma.name || '')}, então apagar a sua conta deixaria a turma sem dono. Apague a turma antes, aqui na tela da turma, e depois apague a conta.</p><button class="btn btn-block btn-ghost" data-act="perfil">Voltar</button>`
-      : `<p>Sua conta é apagada, e na turma sua carta vira "Ex-jogador", sem nome e sem foto. Os jogos continuam no histórico dos outros, sem identificar você. Não dá para desfazer.</p>
+      : `<p>Sua conta é apagada, e na turma sua carta fica sem nome e sem foto, junto com o perfil e as amizades. Os jogos continuam no histórico dos outros, sem identificar você. Não dá para desfazer.</p>
         <label class="field"><span>Digite sua senha para confirmar</span><input class="input" type="password" id="delPass" autocomplete="current-password"></label>
         <div class="err" role="alert" id="delErr"></div>
         <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-danger" data-act="deleteAccount">Apagar minha conta</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Cancelar</button></div>`;
@@ -1811,7 +1984,7 @@ function gameFormHTML(id) {
 function visField(g) {
   const vis = g ? g.vis : 'turma';
   return `<div class="field"><span>Quem vê a partida</span>
-    <div class="seg seg-full" style="grid-template-columns:1fr 1fr" role="group" aria-label="Quem vê a partida"><button data-act="gVis" data-v="turma" aria-pressed="${vis !== 'privada'}">Toda a turma</button><button data-act="gVis" data-v="privada" aria-pressed="${vis === 'privada'}">Só convidados</button></div>
+    <div class="seg seg-full" style="grid-template-columns:1fr 1fr 1fr" role="group" aria-label="Quem vê a partida"><button data-act="gVis" data-v="turma" aria-pressed="${vis === 'turma'}">Toda a turma</button><button data-act="gVis" data-v="amigos" aria-pressed="${vis === 'amigos'}">Só amigos</button><button data-act="gVis" data-v="privada" aria-pressed="${vis === 'privada'}">Só convidados</button></div>
     <p class="sub small" id="gVisHint" style="margin-top:8px" ${vis === 'privada' ? '' : 'hidden'}>${g ? 'Quem vê você escolhe dentro da partida, em Convidar.' : 'Depois de criar, abra a partida e toque em Convidar para escolher quem vê.'}</p></div>`;
 }
 function nextDateLike(last) {
@@ -1837,9 +2010,9 @@ function inviteHTML(g) {
   const W = canEditGame(g);
   let h = '';
   if (FB() && W) {
-    h += `<div class="field"><span>Quem vê a partida</span><div class="seg seg-full" style="grid-template-columns:1fr 1fr" role="group" aria-label="Quem vê a partida"><button data-act="setVis" data-v="turma" aria-pressed="${g.vis !== 'privada'}">Toda a turma</button><button data-act="setVis" data-v="privada" aria-pressed="${g.vis === 'privada'}">Só convidados</button></div></div>`;
+    h += `<div class="field"><span>Quem vê a partida</span><div class="seg seg-full" style="grid-template-columns:1fr 1fr 1fr" role="group" aria-label="Quem vê a partida"><button data-act="setVis" data-v="turma" aria-pressed="${g.vis === 'turma'}">Toda a turma</button><button data-act="setVis" data-v="amigos" aria-pressed="${g.vis === 'amigos'}">Só amigos</button><button data-act="setVis" data-v="privada" aria-pressed="${g.vis === 'privada'}">Só convidados</button></div>${g.vis === 'amigos' ? '<p class="sub small" style="margin-top:8px">Só os amigos de quem marcou veem a partida e confirmam presença.</p>' : ''}</div>`;
     if (g.vis === 'privada') {
-      const people = Object.values(S.members).filter(m => m.uid !== g.createdBy).map(m => ({ uid: m.uid, p: P(m.uid), name: (P(m.uid) && (P(m.uid).nick || P(m.uid).name)) || m.name || 'Sem nome' })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+      const people = Object.values(S.members).filter(m => m.uid !== g.createdBy && (!privacyOn() || (P(m.uid) && P(m.uid).known))).map(m => ({ uid: m.uid, p: P(m.uid), name: (P(m.uid) && (P(m.uid).nick || P(m.uid).name)) || m.name || 'Sem nome' })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
       h += section('Pessoas da turma', `<p class="sub small" style="margin:-4px 0 10px">Só quem estiver convidado vê a partida e confirma presença.</p>` + (people.length ? listBox(people.map(m => {
         const on = g.allowed.includes(m.uid);
         return `<div class="pres">${avatar(m.p || { name: m.name })}<div class="item-main"><div class="item-title">${esc(m.name)}</div><div class="item-sub">${g.conf.includes(m.uid) ? 'Confirmado' : (on ? 'Convidado' : 'Não vê a partida')}</div></div><button class="toggle" data-act="inviteToggle" data-uid="${esc(m.uid)}" aria-pressed="${on}">${on ? 'Convidado' : 'Convidar'}</button></div>`;
@@ -1862,11 +2035,16 @@ function perfilHTML() {
     : `<div class="empty"><h3>Você ainda não tem carta</h3><p class="sub">Crie a sua para entrar no elenco e confirmar presença.</p><button class="btn btn-ball" data-act="newSelf">Criar minha carta</button></div>`;
   h += `<p class="sub small" style="text-align:center;margin-top:10px">Conectado como ${esc(S.me.name)}, ${esc(S.me.email)}.</p>`;
   h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">${esc(S.turma && S.turma.name ? S.turma.name : 'Turma')}</h2>${admin ? '<button class="btn btn-sm" data-act="renameTurma">Renomear</button>' : ''}</div>`;
-  h += `<div><div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link de convite</button>' : ''}</div><p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p></div>`;
-  h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, listBox(members.map(m => {
+  h += `<div><div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link da turma</button>' : ''}${privacyOn() ? '<button class="btn btn-block btn-ghost" data-act="askNewMyLink">Trocar o meu link</button>' : ''}</div>${privacyOn() ? '<p class="sub small" style="margin-top:8px">Quem entra pelo seu link chega como seu amigo. Se o seu link vazar, troque: o antigo para de funcionar.</p>' : ''}<p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p></div>`;
+  if (privacyOn() && !admin) {
+    const fr = members.filter(m => m.uid !== meId() && isFriend(m.uid));
+    h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, `<p class="sub" style="margin:-4px 0 10px">Você vê o nome só de quem é seu amigo.</p>` + (fr.length ? listBox(fr.map(m => `<div class="pres">${avatar(P(m.uid) || personalOf(m.uid) || { name: '?' })}<div class="item-main"><div class="item-title">${esc(nameOf(m.uid))}</div><div class="item-sub">Amigo</div></div></div>`)) : ''));
+  } else h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, listBox(members.map(m => {
     const role = S.turma && S.turma.ownerUid === m.uid ? 'Criou a turma' : (S.turma && (S.turma.admins || []).includes(m.uid) ? 'Admin' : 'Membro');
     const canKick = admin && m.uid !== meId() && !(S.turma && S.turma.ownerUid === m.uid);
-    return `<div class="pres">${avatar(P(m.uid) || { name: m.name || '?' })}<div class="item-main"><div class="item-title">${esc(m.name || 'Sem nome')}${m.uid === meId() ? ' (você)' : ''}</div><div class="item-sub">${role}${P(m.uid) ? '' : ', ainda sem carta'}</div></div>${canKick ? `<button class="btn btn-sm btn-danger" data-act="askRemoveMember" data-uid="${esc(m.uid)}">Tirar</button>` : ''}</div>`;
+    const nm = (P(m.uid) && P(m.uid).known) ? (P(m.uid).nick || P(m.uid).name) : ((personalOf(m.uid) || {}).name || m.name || 'Sem nome');
+    const by = m.by && m.by !== m.uid ? `, chamado por ${(P(m.by) && P(m.by).known) ? (P(m.by).nick || P(m.by).name) : ((personalOf(m.by) || {}).name || 'alguém')}` : '';
+    return `<div class="pres">${avatar(P(m.uid) || { name: nm })}<div class="item-main"><div class="item-title">${esc(nm)}${m.uid === meId() ? ' (você)' : ''}</div><div class="item-sub">${role}${P(m.uid) ? '' : ', ainda sem carta'}${esc(by)}</div></div>${canKick ? `<button class="btn btn-sm btn-danger" data-act="askRemoveMember" data-uid="${esc(m.uid)}">Tirar</button>` : ''}</div>`;
   })));
   h += section('Suas turmas', myTurmasList(S.turmaId) + `<div style="margin-top:10px"><button class="btn btn-block" data-act="newTurma">${ICON.plus}Nova turma</button></div>`);
   h += `<div style="display:grid;gap:10px;margin-top:16px">${owner ? '<button class="btn btn-block btn-danger" data-act="askDeleteTurma">Apagar esta turma</button>' : '<button class="btn btn-block btn-ghost" data-act="askLeaveTurma">Sair da turma</button>'}<button class="btn btn-block btn-ghost" data-act="signOut">Sair da conta</button><button class="btn btn-block btn-danger" data-act="askDeleteAccount">Apagar minha conta</button></div>`;
@@ -2026,6 +2204,10 @@ function playerHTML(p) {
   const hist = p.hist.map(h => h.ovr);
   let h = `<div class="card-lg" style="margin-bottom:14px">${cardHTML(p, { destaque: p.id === mvpId(), zoom: true })}</div>`;
   if (p.photo) h += `<p class="sub small" style="text-align:center;margin-top:-6px">Toque na foto para ver maior.</p>`;
+  if (FB() && privacyOn() && canFriend(p.id)) {
+    const st = friendState(p.id), n = gamesTogether(p.id);
+    h += `<div style="display:grid;gap:8px;margin:4px 0 14px">${st === 'friend' ? `<p class="sub" style="text-align:center;margin:0">Vocês são amigos${n ? `, jogaram ${n === 1 ? '1 vez' : n + ' vezes'} juntos` : ''}.</p><button class="btn btn-block btn-ghost" data-act="askUnfriend" data-uid="${esc(p.id)}">Desfazer amizade</button>` : `${friendBtn(p.id, true)}${st === 'received' ? `<button class="btn btn-block btn-ghost" data-act="friendCancel" data-uid="${esc(p.id)}">Recusar</button>` : ''}${n ? `<p class="sub small" style="text-align:center;margin:0">Vocês jogaram ${n === 1 ? '1 vez' : n + ' vezes'} juntos.</p>` : ''}`}</div>`;
+  }
   const extra = [p.height ? `${fmtN(p.height / 100, 2)} m` : '', ageOf(p) ? `${ageOf(p)} anos` : ''].filter(Boolean).join(', ');
   h += `<p class="sub" style="text-align:center">${esc(posLabel(p))}${extra ? `, ${extra}` : ''}. Técnica ${fmtN(tecnica(p))}, forma ${fmtN(p.forma)}.</p>`;
   if (FB()) {
@@ -2173,6 +2355,7 @@ function tourSlides() {
   return [
     { art: cardArt, title: 'Esta é a sua carta', text: 'O número grande é o seu geral, que junta seus fundamentos com a sua forma nos jogos. A cor mostra o nível, de bronze a lenda. Nos 5 primeiros jogos ela se ajusta mais rápido.' },
     { art: boardArt, title: 'Presença em um toque', text: 'O próximo jogo aparece no topo: é só tocar em Vou jogar. Se lotar, você entra na espera e é avisado quando abrir vaga. Quem marca a partida é quem cuida dela, e você também pode marcar as suas.' },
+    ...(privacyOn() ? [{ art: `<div class="tour-score" aria-hidden="true"><div class="tour-set"><span class="av">R</span><b style="font-size:18px">Rafa</b><span class="spacer"></span><span class="btn btn-sm">Adicionar</span></div><div class="tour-set"><span class="av">B</span><b style="font-size:18px">Bia</b><span class="spacer"></span><span class="pill pill-done">Amigos</span></div></div>`, title: 'Sua galera', text: 'Você entra como amigo de quem te convidou. Depois de cada jogo, quem jogou com você aparece em Jogou recentemente, no Elenco, para você mandar pedido de amizade. Nome e foto só os amigos veem.' }] : []),
     { art: scoreArt, title: 'O placar mexe nas cartas', text: 'Quando o placar é anotado, as cartas sobem ou descem na hora. Se quem marcou não for admin da turma, alguém do outro time confirma o placar antes de valer.' }
   ];
 }
@@ -2203,6 +2386,221 @@ function closeTour() {
 }
 function maybeTour() { if (window.MANCHETE_NO_TOUR) return; if (FB() && P(meId()) && !tourDone() && !S.userTourDone) setTimeout(openTour, 350); }
 
+// ---------- Amizades e privacidade ----------
+// Nome, apelido, foto, altura e idade ficam num perfil que só o próprio, os amigos e o admin leem.
+// Em cada partida, quem está nela tem uma cópia do nome visível só para quem vê a partida.
+const PERSONAL = ['name', 'nick', 'photo', 'height', 'birthYear'];
+const privacyOn = () => FBM() && !!S.turma && (S.turma.privacyV || 1) >= 2;
+const pairId = (a, b) => (a < b ? a + '_' + b : b + '_' + a);
+const friendDoc = u => S.friendships[pairId(meId() || '', u || '')] || null;
+const isFriend = u => { const f = friendDoc(u); return !!f && f.status === 'accepted'; };
+function friendState(u) {
+  if (!u || u === meId()) return 'self';
+  const f = friendDoc(u);
+  if (!f) return 'none';
+  if (f.status === 'accepted') return 'friend';
+  return f.from === meId() ? 'sent' : 'received';
+}
+const friendIds = () => Object.values(S.friendships).filter(f => f.status === 'accepted' && f.users).map(f => f.users.find(x => x !== meId())).filter(Boolean);
+const hasAccount = id => { const p = S.players[id]; return !!(p && !p.guest && p.ownerUid); };
+const canFriend = id => FB() && hasAccount(id) && id !== meId() && !!S.members[id] && !!S.members[meId()];
+const smallPhoto = ph => (typeof ph === 'string' && PHOTO_RE.test(ph) && ph.length < 200000 ? ph : '');
+function cleanProfile(d) {
+  d = d || {};
+  return {
+    name: String(d.name || '').trim().slice(0, 40), nick: String(d.nick || '').trim().slice(0, 16), photo: smallPhoto(d.photo),
+    height: typeof d.height === 'number' && d.height >= 120 && d.height <= 230 ? Math.round(d.height) : null,
+    birthYear: typeof d.birthYear === 'number' && d.birthYear >= 1930 && d.birthYear <= new Date().getFullYear() - 6 ? Math.round(d.birthYear) : null
+  };
+}
+const profileFrom = p => cleanProfile({ name: p.name, nick: p.nick, photo: p.photo, height: p.height, birthYear: p.birthYear });
+const basicFrom = p => { const c = cleanProfile(p); return { name: c.name || 'Jogador', nick: c.nick, photo: c.photo }; };
+function personalOf(id) {
+  if (S.profiles[id]) return S.profiles[id];
+  let best = null, bestKey = '';
+  for (const [gid, ro] of Object.entries(S.rosters)) { const r = ro && ro[id]; if (!r) continue; const g = S.games[gid]; const k = g ? g.date + g.time : ''; if (!best || k > bestKey) { best = r; bestKey = k; } }
+  if (best) return best;
+  if (S.myMirrors[id]) return S.myMirrors[id];
+  for (const list of Object.values(S.fofMirrors)) if (list && list[id]) return list[id];
+  for (const f of Object.values(S.friendships)) {
+    if (!f.users || !f.users.includes(id)) continue;
+    if (f.from === id && f.fromName) return cleanProfile({ name: f.fromName, nick: f.fromNick, photo: f.fromPhoto });
+    if (f.from !== id && f.toName) return cleanProfile({ name: f.toName, nick: f.toNick, photo: f.toPhoto });
+  }
+  return null;
+}
+function myBasic() {
+  const p = P(meId());
+  if (p) return basicFrom(p);
+  return { name: (S.me && S.me.name) || 'Jogador', nick: '', photo: '' };
+}
+function participantsOf(g) { return [...new Set([...(g.conf || []), ...teamIds(g)])]; }
+// Últimas 10 partidas com placar em que eu joguei.
+function myRecentGames(n = 10) { const me = meId(); return Object.values(S.games).filter(g => hasResult(g) && teamIds(g).includes(me)).sort((a, b) => byDate(b, a)).slice(0, n); }
+function coPlayers() {
+  const out = new Map(), me = meId();
+  for (const g of myRecentGames()) for (const id of teamIds(g)) { if (id === me || !S.players[id]) continue; out.set(id, (out.get(id) || 0) + 1); }
+  return out;
+}
+function gamesTogether(id) { const me = meId(); let n = 0; for (const g of Object.values(S.games)) if (hasResult(g) && teamIds(g).includes(me) && teamIds(g).includes(id)) n++; return n; }
+
+function startSocial() {
+  if (!FBM() || !window.MCloud.watchFriendships) return;
+  S.unsubs.push(window.MCloud.watchFriendships(meId(), list => {
+    const m = {}; for (const f of list || []) if (f && f.id && Array.isArray(f.users)) m[f.id] = f;
+    S.friendships = m; dirty(); syncSocial(); healMirrors(); render(); renderNotifBadge();
+  }, () => { }));
+  S.unsubs.push(window.MCloud.watchMirrors(meId(), list => {
+    const m = {}; for (const x of list || []) if (x && x.uid) m[x.uid] = cleanProfile(x);
+    S.myMirrors = m; dirty(); render();
+  }, () => { }));
+  ensureToken();
+}
+async function ensureToken() {
+  if (!FBM() || !S.db || !S.db.getConvite || S.myToken) return;
+  try {
+    let tk = await S.db.getConvite(meId());
+    if (!tk) { tk = randToken(); await S.db.setConvite(meId(), tk); }
+    S.myToken = tk;
+  } catch (e) { }
+}
+const randToken = () => { const a = new Uint8Array(12); crypto.getRandomValues(a); return Array.from(a, x => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join(''); };
+// Liga e desliga os ouvintes de perfil e de nomes por partida conforme amigos e partidas mudam.
+function syncSocial() {
+  if (!FBM() || !S.db || !S.db.watchProfile || !S.turma || !S.me) return;
+  const pm = S.social.profiles, want = new Set();
+  if (isTurmaAdmin()) want.add('*');
+  else {
+    want.add(meId());
+    for (const f of friendIds()) want.add(f);
+    for (const p of Object.values(S.players)) if (p.guest && p.createdBy === meId()) want.add(p.id);
+  }
+  for (const [k, off] of pm) if (!want.has(k)) { try { off(); } catch (e) { } pm.delete(k); if (k !== '*') delete S.profiles[k]; }
+  for (const k of want) {
+    if (pm.has(k)) continue;
+    if (k === '*') pm.set(k, S.db.watchProfiles(list => { const m = {}; for (const x of list || []) if (x && x.id) m[x.id] = cleanProfile(x); S.profiles = m; dirty(); render(); }, () => { }));
+    else pm.set(k, S.db.watchProfile(k, d => { if (d) S.profiles[k] = cleanProfile(d); else delete S.profiles[k]; dirty(); render(); }, () => { }));
+  }
+  if (pm.has('*') && pm.size > 1) for (const [k, off] of pm) if (k !== '*') { try { off(); } catch (e) { } pm.delete(k); }
+  // Nomes por partida: próximas partidas visíveis, as últimas 15 e a aberta agora.
+  const rm = S.social.rosters, wantG = new Set(), t = todayStr();
+  const vis = Object.values(S.games).filter(gameVisible);
+  for (const g of vis) if (g.status !== 'encerrado' && g.date >= t) wantG.add(g.id);
+  for (const g of vis.sort((a, b) => byDate(b, a)).slice(0, 15)) wantG.add(g.id);
+  for (const g of myRecentGames()) wantG.add(g.id);
+  if (S.ui.gameId && S.games[S.ui.gameId] && gameVisible(S.games[S.ui.gameId])) wantG.add(S.ui.gameId);
+  for (const [gid, off] of rm) if (!wantG.has(gid)) { try { off(); } catch (e) { } rm.delete(gid); }
+  for (const gid of wantG) {
+    if (rm.has(gid)) continue;
+    rm.set(gid, S.db.watchRoster(gid, list => { const m = {}; for (const x of list || []) if (x && x.id) m[x.id] = basicFrom(x); S.rosters[gid] = m; dirty(); render(); }, () => { }));
+  }
+}
+// Garante que quem está na partida tem o nome guardado nela (quem marcou cuida dos convidados).
+const ROSTER_ASKED = new Set();
+function ensureRoster(g) {
+  if (!FB() || !privacyOn() || !g || !S.db.setRoster) return;
+  const ro = S.rosters[g.id] || {}, W = canEditGame(g);
+  for (const id of participantsOf(g)) {
+    if (ro[id] || ROSTER_ASKED.has(g.id + id)) continue;
+    if (id !== meId() && !W) continue;
+    const p = P(id); if (!p || !p.known) continue;
+    ROSTER_ASKED.add(g.id + id);
+    S.db.setRoster(g.id, id, basicFrom(p)).catch(() => ROSTER_ASKED.delete(g.id + id));
+  }
+}
+// Listas de amigos: cada um guarda nome e foto dos amigos, e eu atualizo o meu nome na lista deles.
+let HEAL_T = null;
+function healMirrors() {
+  clearTimeout(HEAL_T);
+  HEAL_T = setTimeout(() => {
+    if (!FBM() || !S.me || !window.MCloud.mirrorSet) return;
+    const mine = myBasic(), sig = JSON.stringify(mine);
+    for (const f of friendIds()) {
+      const info = personalOf(f);
+      if (!S.myMirrors[f] && info) window.MCloud.mirrorSet(meId(), f, basicFrom(info)).catch(() => { });
+      const k = 'manchete:mm:' + meId() + ':' + f;
+      let done = ''; try { done = localStorage.getItem(k) || ''; } catch (e) { }
+      if (done !== sig && P(meId())) window.MCloud.mirrorSet(f, meId(), mine).then(() => { try { localStorage.setItem(k, sig); } catch (e) { } }).catch(() => { });
+    }
+  }, 400);
+}
+async function loadFof(force) {
+  if (!FB() || !window.MCloud.getMirrors) return;
+  if (!force && S.fofAt && Date.now() - S.fofAt < 10 * 60 * 1000) return;
+  S.fofAt = Date.now();
+  for (const f of friendIds()) {
+    try { const list = await window.MCloud.getMirrors(f); const m = {}; for (const x of list || []) if (x && x.uid) m[x.uid] = cleanProfile(x); S.fofMirrors[f] = m; } catch (e) { }
+  }
+  dirty(); render();
+}
+async function runAutoFriend() {
+  const pa = S.pendingAutoFriend; S.pendingAutoFriend = null;
+  if (!pa || !S.turma || !window.MCloud.friendSet) return;
+  const other = pa.by || S.turma.ownerUid;
+  if (!other || other === meId()) return;
+  const id = pairId(meId(), other);
+  if (S.friendships[id]) return;
+  const data = { users: [meId(), other].sort(), from: other, status: 'accepted', via: pa.by ? 'convite' : 'turma', k: pa.k, turma: S.turmaId, created: Date.now(), acceptedAt: Date.now() };
+  try { await window.MCloud.friendSet(id, data); } catch (e) { }
+}
+// Migração de privacidade: roda uma vez, no aparelho de quem criou a turma.
+async function runPrivacyMigration() {
+  if (S.migratingPriv || !FB() || !S.turma || privacyOn() || S.turma.ownerUid !== meId() || !window.MCloud.batch) return;
+  S.migratingPriv = true;
+  const t = S.turmaId, base = `turmas/${t}`, MC = window.MCloud;
+  try {
+    const players = Object.values(S.players), ts = Date.now();
+    const backup = [{ op: 'set', path: `${base}/backups/${ts}_membros`, data: { kind: 'membros', at: ts, data: clone(S.members) } }];
+    for (const p of players) backup.push({ op: 'set', path: `${base}/backups/${ts}_p_${p.id}`, data: { kind: 'player', at: ts, id: p.id, data: clone(p) } });
+    await MC.batch(backup);
+    await MC.batch(players.map(p => ({ op: 'set', path: `${base}/profiles/${p.id}`, data: profileFrom(p) })));
+    const rops = [];
+    for (const g of Object.values(S.games)) for (const id of participantsOf(g)) if (S.players[id]) rops.push({ op: 'set', path: `${base}/games/${g.id}/roster/${id}`, data: basicFrom(S.players[id]) });
+    await MC.batch(rops);
+    const fops = [];
+    for (const m of Object.values(S.members)) {
+      if (!m.uid || m.uid === meId()) continue;
+      const id = pairId(meId(), m.uid);
+      if (S.friendships[id] && S.friendships[id].status === 'accepted') continue;
+      if (S.friendships[id]) fops.push({ op: 'delete', path: `friendships/${id}` });
+      fops.push({ op: 'set', path: `friendships/${id}`, data: { users: [meId(), m.uid].sort(), from: meId(), status: 'accepted', via: 'migracao', turma: t, created: ts, acceptedAt: ts } });
+    }
+    for (const op of fops) await MC.batch([op]);
+    const mine = basicFrom(S.players[meId()] || { name: S.me.name });
+    const mops = [];
+    for (const m of Object.values(S.members)) {
+      if (!m.uid || m.uid === meId()) continue;
+      const p = S.players[m.uid];
+      mops.push({ op: 'set', path: `users/${meId()}/amigos/${m.uid}`, data: basicFrom(p || { name: m.name }) });
+      mops.push({ op: 'set', path: `users/${m.uid}/amigos/${meId()}`, data: mine });
+    }
+    await MC.batch(mops);
+    await MC.batch(players.map(p => ({ op: 'strip', path: `${base}/players/${p.id}`, fields: PERSONAL })));
+    await MC.batch(Object.values(S.members).filter(m => m.uid && m.name !== undefined).map(m => ({ op: 'strip', path: `${base}/membros/${m.uid}`, fields: ['name'] })));
+    await MC.batch([{ op: 'set', path: base, data: { privacyV: 2 }, merge: true }]);
+    // Depois de ligar, limpa de novo quem gravou nome na carta no meio do caminho.
+    await MC.batch(Object.keys(S.players).map(id => ({ op: 'strip', path: `${base}/players/${id}`, fields: PERSONAL })));
+    toast('Privacidade atualizada: nome e foto agora só para amigos.');
+  } catch (e) {
+    console.warn('migração de privacidade', e);
+  }
+  S.migratingPriv = false;
+}
+// Grava o meu perfil (e o de convidados que criei) quando a privacidade está ligada.
+function saveProfile(id) {
+  if (!FB() || !privacyOn() || !S.db.setProfile) return Promise.resolve();
+  const raw = S.players[id]; if (!raw) return Promise.resolve();
+  const pr = profileFrom(raw);
+  S.profiles[id] = pr; dirty();
+  const jobs = [S.db.setProfile(id, pr)];
+  if (id === meId()) {
+    const b = basicFrom(pr);
+    for (const f of friendIds()) jobs.push(window.MCloud.mirrorSet(f, meId(), b).catch(() => { }));
+    for (const g of Object.values(S.games)) if (g.status !== 'encerrado' && g.date >= todayStr() && participantsOf(g).includes(id)) jobs.push(S.db.setRoster(g.id, id, b).catch(() => { }));
+  }
+  return Promise.all(jobs).catch(() => toast('Não consegui salvar o perfil. Tente de novo.'));
+}
+
 // ---------- Presença no modo com conta: muda só a própria linha, sem sobrescrever a dos outros ----------
 function presenceSet(g, id, on) {
   if (on) { if (!g.conf.includes(id)) g.conf.push(id); }
@@ -2210,6 +2608,7 @@ function presenceSet(g, id, on) {
   const paidChanged = !on && g.paid.includes(id) && canEditGame(g);
   if (paidChanged) g.paid = g.paid.filter(x => x !== id);
   dirty(); render();
+  if (on && privacyOn() && S.db.setRoster && P(id) && P(id).known) S.db.setRoster(g.id, id, basicFrom(P(id))).catch(() => { });
   S.db.presence(g.id, id, on).catch(e => { toast(e && e.code === 'permission-denied' ? 'Você não tem permissão para isso.' : 'Não consegui salvar a presença. Tente de novo.'); resync(); });
   if (paidChanged) persist('games', g.id);
 }
@@ -2315,10 +2714,64 @@ function keepFormInputs(fn) {
 
 // ---------- Ações ----------
 const ACT = {
-  tab: el => { S.ui.tab = el.dataset.tab; S.ui.gameId = null; render(); window.scrollTo(0, 0); setTimeout(healViewport, 50); },
+  tab: el => { S.ui.tab = el.dataset.tab; S.ui.gameId = null; render(); window.scrollTo(0, 0); setTimeout(healViewport, 50); if (S.ui.tab === 'elenco') loadFof(); },
   home: () => { S.ui.gameId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
   help: () => openSheet({ type: 'help' }),
   closeSheet: () => closeSheet(),
+  elencoTab: el => { S.ui.elencoTab = el.dataset.v === 'recentes' ? 'recentes' : 'amigos'; render(); },
+  rankScope: el => { S.ui.rankScope = el.dataset.v === 'recentes' ? 'recentes' : 'amigos'; render(); },
+  friendAdd: async el => {
+    const u = el.dataset.uid; if (!canFriend(u) || friendState(u) !== 'none') return;
+    const id = pairId(meId(), u), mine = myBasic(), th = personalOf(u) || {};
+    const data = { users: [meId(), u].sort(), from: meId(), status: 'pending', turma: S.turmaId, created: Date.now(), fromName: mine.name, fromNick: mine.nick, fromPhoto: mine.photo, toName: th.name || '', toNick: th.nick || '', toPhoto: smallPhoto(th.photo) };
+    S.friendships[id] = Object.assign({ id }, data); dirty(); render(); if (S.ui.sheet) renderSheet();
+    try { await window.MCloud.friendSet(id, data); toast(`Pedido de amizade enviado para ${nameOf(u)}.`); }
+    catch (e) { delete S.friendships[id]; dirty(); render(); if (S.ui.sheet) renderSheet(); toast('Não consegui mandar o pedido. Tente de novo.'); }
+  },
+  friendAccept: async el => {
+    const u = el.dataset.uid, f = friendDoc(u); if (!f || f.status !== 'pending' || f.from === meId()) return;
+    f.status = 'accepted'; f.acceptedAt = Date.now(); dirty(); render(); if (S.ui.sheet) renderSheet();
+    try {
+      await window.MCloud.friendAccept(f.id);
+      const th = personalOf(u) || cleanProfile({ name: f.fromName, nick: f.fromNick, photo: f.fromPhoto });
+      window.MCloud.mirrorSet(meId(), u, basicFrom(th)).catch(() => { });
+      window.MCloud.mirrorSet(u, meId(), myBasic()).catch(() => { });
+      toast(`Agora você e ${nameOf(u)} são amigos.`);
+    } catch (e) { f.status = 'pending'; dirty(); render(); toast('Não consegui aceitar agora. Tente de novo.'); }
+  },
+  friendCancel: async el => {
+    const u = el.dataset.uid, f = friendDoc(u); if (!f || f.status === 'accepted') return;
+    const was = f.from === meId();
+    delete S.friendships[f.id]; dirty(); render(); if (S.ui.sheet) renderSheet();
+    try { await window.MCloud.friendRemove(f.id); toast(was ? 'Pedido cancelado.' : 'Pedido recusado.'); } catch (e) { toast('Não consegui agora. Tente de novo.'); }
+  },
+  askUnfriend: el => openSheet({ type: 'unfriend', uid: el.dataset.uid }),
+  unfriend: async el => {
+    const u = el.dataset.uid, f = friendDoc(u); closeSheet(); if (!f) return;
+    delete S.friendships[f.id]; dirty(); render();
+    try {
+      await window.MCloud.friendRemove(f.id);
+      window.MCloud.mirrorDelete(meId(), u).catch(() => { }); window.MCloud.mirrorDelete(u, meId()).catch(() => { });
+      toast('Amizade desfeita.');
+    } catch (e) { toast('Não consegui agora. Tente de novo.'); }
+  },
+  sugHide: el => {
+    const u = el.dataset.uid, k = 'manchete:sugx:' + meId();
+    let m = {}; try { m = JSON.parse(localStorage.getItem(k) || '{}'); } catch (e) { }
+    m[u] = Date.now(); try { localStorage.setItem(k, JSON.stringify(m)); } catch (e) { }
+    render(); if (S.ui.sheet) renderSheet();
+  },
+  notifs: () => {
+    openSheet({ type: 'notifs' }); loadFof();
+    const now = Date.now();
+    try { localStorage.setItem(notifKey(), String(now)); } catch (e) { }
+    S.notifSeenCloud = now; window.MCloud.setUser(meId(), { notifSeen: now }).catch(() => { });
+    renderTop();
+  },
+  askNewMyLink: () => openSheet({ type: 'confirm', title: 'Trocar o meu link', text: 'O seu link antigo para de funcionar, e quem já entrou continua na turma. Depois é só mandar o link novo.', ok: 'Trocar o link', run: async () => {
+    const tk = randToken();
+    try { await S.db.setConvite(meId(), tk); S.myToken = tk; closeSheet(); toast('Pronto, o seu link novo já vale.'); } catch (e) { toast('Não consegui trocar agora.'); }
+  } }),
   tourNext: () => {
     const box = $('#tourSlides'); if (!box) return;
     const i = tourIndex(), n = document.querySelectorAll('.tour-slide').length;
@@ -2441,7 +2894,7 @@ const ACT = {
   reload: () => location.reload(),
   sort: el => { S.ui.sort = el.dataset.sort; render(); },
   rankSort: el => { S.ui.rankSort = el.dataset.sort; render(); },
-  openGame: el => { if (!gameVisible(S.games[el.dataset.id])) return toast('Essa partida é privada.'); S.ui.gameId = el.dataset.id; S.ui.step = null; S.ui.selP = null; S.ui.swapSel = null; S.ui.openRep = null; S.ui.flash = ''; render(); window.scrollTo(0, 0); },
+  openGame: el => { if (!gameVisible(S.games[el.dataset.id])) return toast('Essa partida é privada.'); if (S.ui.sheet) closeSheet(); S.ui.gameId = el.dataset.id; syncSocial(); S.ui.step = null; S.ui.selP = null; S.ui.swapSel = null; S.ui.openRep = null; S.ui.flash = ''; render(); window.scrollTo(0, 0); },
   step: el => { S.ui.step = el.dataset.step; S.ui.swapSel = null; render(); window.scrollTo(0, 0); },
   newGame: () => openSheet({ type: 'gameForm' }),
   editGame: () => { const g = curGame(); if (g && canEditGame(g)) openSheet({ type: 'gameForm', id: g.id }); },
@@ -2493,7 +2946,8 @@ const ACT = {
   },
   openVote: el => {
     const g = S.games[el.dataset.id]; if (!g) return;
-    S.ui.gameId = g.id; S.ui.step = 'placar'; render();
+    if (S.ui.sheet) closeSheet();
+    S.ui.gameId = g.id; S.ui.step = 'placar'; syncSocial(); render();
     setTimeout(() => { const v = $('#votacao'); if (v) v.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }, 60);
   },
   confirmScore: el => {
@@ -2513,7 +2967,7 @@ const ACT = {
   openInvite: () => { const g = curGame(); if (g) openSheet({ type: 'invite', gameId: g.id }); },
   setVis: el => {
     const g = S.games[S.ui.sheet && S.ui.sheet.gameId]; if (!g || !canEditGame(g) || !FB()) return;
-    g.vis = el.dataset.v === 'privada' ? 'privada' : 'turma';
+    g.vis = ['privada', 'amigos'].includes(el.dataset.v) ? el.dataset.v : 'turma';
     if (g.vis === 'privada') g.allowed = [...new Set((g.createdBy ? [g.createdBy] : []).concat(g.allowed))];
     persist('games', g.id); renderSheet(); render();
   },
@@ -2721,7 +3175,7 @@ const ACT = {
     if (f.pid && RAW(f.pid)) {
       const raw = RAW(f.pid);
       if (!canEditPlayer(P(f.pid))) return closeSheet();
-      const hadPhoto = !!raw.photo;
+      const hadPhoto = !!(raw.photo || (P(raw.id) && P(raw.id).photo));
       Object.assign(raw, { name, nick, pos: f.pos, pos2: f.pos2.slice(), photo: f.photo, height, birthYear: age != null ? (ageOf(raw) === age ? raw.birthYear : birthYear) : null, updated: Date.now() });
       if (f.notes === 'base') { const at = {}; for (const a of ATTRS) at[a] = clamp(Math.round(f.at[a]), 40, cap); raw.base = { at, forma: null }; }
       else if (f.notes === 'adj') {
@@ -2729,7 +3183,8 @@ const ACT = {
         for (const a of ATTRS) if (Math.abs(f.at[a] - f.start[a]) > 1e-9) changed[a] = clamp(Math.round(f.at[a]), 40, 99);
         if (Object.keys(changed).length) raw.adj = (raw.adj || []).concat([{ t: adjTime(), at: changed }]);
       }
-      persist('players', raw.id, 0, () => savePhotoBig(raw.id, f, hadPhoto)); closeSheet(); render(); toast(f.kind === 'self' ? 'Sua carta foi salva.' : 'Jogador salvo.');
+      if (privacyOn()) { S.profiles[raw.id] = profileFrom(raw); dirty(); }
+      persist('players', raw.id, 0, () => { savePhotoBig(raw.id, f, hadPhoto); saveProfile(raw.id); }); closeSheet(); render(); toast(f.kind === 'self' ? 'Sua carta foi salva.' : 'Jogador salvo.');
       return;
     }
     const at = {}; for (const a of ATTRS) at[a] = clamp(Math.round(f.at[a]), 40, cap);
@@ -2737,7 +3192,8 @@ const ACT = {
     if (!id || (f.kind === 'self' && S.players[id])) return closeSheet();
     const who = FBM() ? { ownerUid: f.kind === 'self' ? meId() : null, guest: f.kind === 'guest', createdBy: meId() } : {};
     const p = cleanPlayer(id, Object.assign({ name, nick, pos: f.pos, pos2: f.pos2, level: f.level, photo: f.photo, height, birthYear, base: { at }, adj: [], created: Date.now(), updated: Date.now() }, who));
-    S.players[p.id] = p; persist('players', p.id, 0, () => savePhotoBig(p.id, f, false));
+    S.players[p.id] = p; if (privacyOn()) { S.profiles[p.id] = profileFrom(p); dirty(); }
+    persist('players', p.id, 0, () => { savePhotoBig(p.id, f, false); saveProfile(p.id); });
     const gid = f.forGame;
     if (gid && S.games[gid] && S.games[gid].status !== 'encerrado') {
       if (FBM()) presenceSet(S.games[gid], p.id, true);
@@ -2846,7 +3302,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top
 // Manchete: ponte com o Firebase (login por e-mail e senha + banco Firestore)
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, collection, setDoc, getDoc, getDocs, deleteDoc, updateDoc, onSnapshot, writeBatch, arrayUnion, arrayRemove } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, collection, setDoc, getDoc, getDocs, deleteDoc, updateDoc, onSnapshot, writeBatch, arrayUnion, arrayRemove, query, where, deleteField } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const app = initializeApp(window.MANCHETE_FIREBASE);
 const auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
@@ -2879,18 +3335,41 @@ window.MCloud = {
     const ref = doc(collection(fs, 'turmas'));
     const c = code();
     const b = writeBatch(fs);
-    b.set(ref, { name, ownerUid: me.uid, admins: [me.uid], inviteCode: c, created: Date.now() });
-    b.set(doc(fs, 'turmas', ref.id, 'membros', me.uid), { uid: me.uid, name: me.name, joinedAt: Date.now(), code: c });
+    b.set(ref, { name, ownerUid: me.uid, admins: [me.uid], inviteCode: c, created: Date.now(), privacyV: 2 });
+    b.set(doc(fs, 'turmas', ref.id, 'membros', me.uid), { uid: me.uid, joinedAt: Date.now(), code: c });
     b.set(doc(fs, 'users', me.uid), { lastTurma: ref.id, turmas: arrayUnion(ref.id) }, { merge: true });
     await guard(b.commit());
     return { id: ref.id, inviteCode: c };
   },
-  async joinTurma(t, c, me) {
+  async joinTurma(t, c, me, by) {
     const mref = doc(fs, 'turmas', t, 'membros', me.uid);
     let already = false;
     try { already = (await getDoc(mref)).exists(); } catch (e) { already = false; }
-    if (!already) await guard(setDoc(mref, { uid: me.uid, name: me.name, joinedAt: Date.now(), code: c }));
+    if (!already) await guard(setDoc(mref, Object.assign({ uid: me.uid, joinedAt: Date.now(), code: c }, by ? { by } : {})));
     await guard(setDoc(doc(fs, 'users', me.uid), { lastTurma: t, turmas: arrayUnion(t) }, { merge: true }));
+    return !already;
+  },
+  // ---------- Amizades ----------
+  watchFriendships: (uid, next, error) => onSnapshot(query(collection(fs, 'friendships'), where('users', 'array-contains', uid)), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
+  friendSet: (id, data) => guard(setDoc(doc(fs, 'friendships', id), data)),
+  friendAccept: id => guard(updateDoc(doc(fs, 'friendships', id), { status: 'accepted', acceptedAt: Date.now() })),
+  friendRemove: id => guard(deleteDoc(doc(fs, 'friendships', id))),
+  watchMirrors: (uid, next, error) => onSnapshot(collection(fs, 'users', uid, 'amigos'), s => next(s.docs.map(d => ({ uid: d.id, ...d.data() }))), e => error && error(fail(e))),
+  getMirrors: uid => guard(getDocs(collection(fs, 'users', uid, 'amigos')).then(s => s.docs.map(d => ({ uid: d.id, ...d.data() })))),
+  mirrorSet: (owner, friend, info) => guard(setDoc(doc(fs, 'users', owner, 'amigos', friend), info)),
+  mirrorDelete: (owner, friend) => guard(deleteDoc(doc(fs, 'users', owner, 'amigos', friend))),
+  // Grava várias mudanças de uma vez (até 400 por lote). Caminhos a partir da raiz do banco.
+  async batch(ops) {
+    for (let i = 0; i < ops.length; i += 400) {
+      const b = writeBatch(fs);
+      for (const op of ops.slice(i, i + 400)) {
+        const ref = doc(fs, ...op.path.split('/'));
+        if (op.op === 'delete') b.delete(ref);
+        else if (op.op === 'strip') b.update(ref, Object.fromEntries(op.fields.map(f => [f, deleteField()])));
+        else b.set(ref, op.data, op.merge ? { merge: true } : undefined);
+      }
+      await guard(b.commit());
+    }
   },
   async deleteAccount(pass) {
     const u = auth.currentUser;
@@ -2898,8 +3377,20 @@ window.MCloud = {
     try { await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, pass)); } catch (e) { throw fail(e); }
     let turmas = [];
     try { const s = await getDoc(doc(fs, 'users', u.uid)); turmas = (s.exists() && s.data().turmas) || []; } catch (e) { }
+    try {
+      const fr = await getDocs(query(collection(fs, 'friendships'), where('users', 'array-contains', u.uid)));
+      for (const d of fr.docs) { const o = (d.data().users || []).find(x => x !== u.uid); try { await deleteDoc(d.ref); } catch (e) { } if (o) { try { await deleteDoc(doc(fs, 'users', o, 'amigos', u.uid)); } catch (e) { } } }
+      const mine = await getDocs(collection(fs, 'users', u.uid, 'amigos'));
+      for (const d of mine.docs) { try { await deleteDoc(d.ref); } catch (e) { } }
+    } catch (e) { }
     for (const t of turmas) {
-      try { await setDoc(doc(fs, 'turmas', t, 'players', u.uid), { name: 'Ex-jogador', nick: 'Ex-jogador', photo: '', height: null, birthYear: null }, { merge: true }); } catch (e) { }
+      try { await deleteDoc(doc(fs, 'turmas', t, 'profiles', u.uid)); } catch (e) { }
+      try { await deleteDoc(doc(fs, 'turmas', t, 'convites', u.uid)); } catch (e) { }
+      try {
+        const gs = await getDocs(collection(fs, 'turmas', t, 'games'));
+        for (const g of gs.docs) { try { await deleteDoc(doc(fs, 'turmas', t, 'games', g.id, 'roster', u.uid)); } catch (e) { } }
+      } catch (e) { }
+      try { await setDoc(doc(fs, 'turmas', t, 'players', u.uid), { name: deleteField(), nick: deleteField(), photo: deleteField(), height: deleteField(), birthYear: deleteField() }, { merge: true }); } catch (e) { }
       try { await deleteDoc(doc(fs, 'turmas', t, 'photos', u.uid)); } catch (e) { }
       try { await deleteDoc(doc(fs, 'turmas', t, 'membros', u.uid)); } catch (e) { }
     }
@@ -2921,7 +3412,9 @@ window.MCloud = {
   // Apaga a turma inteira: partidas, cartas e membros primeiro, e por último a própria turma.
   async deleteTurma(t, uid) {
     const refs = [];
-    for (const kind of ['games', 'photos', 'players', 'membros']) {
+    const gs = await guard(getDocs(collection(fs, 'turmas', t, 'games')));
+    for (const g of gs.docs) { const r = await guard(getDocs(collection(fs, 'turmas', t, 'games', g.id, 'roster'))); r.docs.forEach(d => refs.push(d.ref)); }
+    for (const kind of ['games', 'photos', 'profiles', 'convites', 'backups', 'players', 'membros']) {
       const s = await guard(getDocs(collection(fs, 'turmas', t, kind)));
       s.docs.forEach(d => { if (!(kind === 'membros' && d.id === uid)) refs.push(d.ref); });
     }
@@ -2963,7 +3456,18 @@ window.MCloud = {
       // Foto grande fica separada da carta e só é baixada quando alguém abre a foto.
       getPhoto: pid => guard(getDoc(doc(fs, 'turmas', t, 'photos', pid)).then(s => (s.exists() ? s.data().big || '' : ''))),
       setPhoto: (pid, big) => guard(setDoc(doc(fs, 'turmas', t, 'photos', pid), { big, updated: Date.now() })),
-      deletePhoto: pid => guard(deleteDoc(doc(fs, 'turmas', t, 'photos', pid)))
+      deletePhoto: pid => guard(deleteDoc(doc(fs, 'turmas', t, 'photos', pid))),
+      // Perfil protegido (nome, apelido, foto, altura e idade).
+      watchProfiles: (next, error) => onSnapshot(collection(fs, 'turmas', t, 'profiles'), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
+      watchProfile: (pid, next, error) => onSnapshot(doc(fs, 'turmas', t, 'profiles', pid), s => next(s.exists() ? { id: s.id, ...s.data() } : null), e => error && error(fail(e))),
+      setProfile: (pid, data) => guard(setDoc(doc(fs, 'turmas', t, 'profiles', pid), data)),
+      deleteProfile: pid => guard(deleteDoc(doc(fs, 'turmas', t, 'profiles', pid))),
+      // Nome de quem está em cada partida.
+      watchRoster: (gid, next, error) => onSnapshot(collection(fs, 'turmas', t, 'games', gid, 'roster'), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
+      setRoster: (gid, pid, data) => guard(setDoc(doc(fs, 'turmas', t, 'games', gid, 'roster', pid), data)),
+      // Link pessoal de convite.
+      getConvite: uid => guard(getDoc(doc(fs, 'turmas', t, 'convites', uid)).then(s => (s.exists() ? s.data().token || '' : ''))),
+      setConvite: (uid, token) => guard(setDoc(doc(fs, 'turmas', t, 'convites', uid), { token, updated: Date.now() }))
     };
   }
 };

@@ -5,12 +5,24 @@ service cloud.firestore {
     function me() { return request.auth.uid; }
     function turmaDoc(t) { return get(/databases/$(database)/documents/turmas/$(t)); }
     function isMember(t) { return signedIn() && exists(/databases/$(database)/documents/turmas/$(t)/membros/$(me())); }
+    function memberOf(t, u) { return exists(/databases/$(database)/documents/turmas/$(t)/membros/$(u)); }
     function isAdmin(t) { return signedIn() && me() in turmaDoc(t).data.admins; }
+    function isOwner(t) { return signedIn() && turmaDoc(t).data.ownerUid == me(); }
     function same(f) { return request.resource.data.get(f, null) == resource.data.get(f, null); }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function fpath(a, b) { return /databases/$(database)/documents/friendships/$(a + '_' + b); }
+    function areFriends(a, b) {
+      return (exists(fpath(a, b)) && get(fpath(a, b)).data.status == 'accepted')
+        || (exists(fpath(b, a)) && get(fpath(b, a)).data.status == 'accepted');
+    }
     function playerDoc(t, p) { return get(/databases/$(database)/documents/turmas/$(t)/players/$(p)); }
     function guestOwner(t, p) { return exists(/databases/$(database)/documents/turmas/$(t)/players/$(p)) && playerDoc(t, p).data.guest == true && (playerDoc(t, p).data.createdBy == me() || isAdmin(t)); }
-    function canJoin(d) { return d.get('vis', 'turma') != 'privada' || me() in d.get('allowed', []); }
+    function gameDoc(t, g) { return get(/databases/$(database)/documents/turmas/$(t)/games/$(g)); }
+    function canJoin(d) {
+      return d.get('vis', 'turma') == 'turma' || me() in d.get('allowed', [])
+        || (d.get('vis', 'turma') == 'amigos' && areFriends(me(), d.createdBy));
+    }
+    function canSeeGame(t, d) { return canJoin(d) || d.createdBy == me() || isAdmin(t); }
     function inTeams(d) {
       let ts = d.get('teams', null);
       return ts != null && ((ts.size() > 0 && me() in ts[0]) || (ts.size() > 1 && me() in ts[1]) || (ts.size() > 2 && me() in ts[2]) || (ts.size() > 3 && me() in ts[3]));
@@ -23,9 +35,40 @@ service cloud.firestore {
         && request.resource.data.get('track', []) == resource.data.get('track', [])
         && request.resource.data.get('log', []).size() == resource.data.get('log', []).size();
     }
+    function privacyOn(t) { return turmaDoc(t).data.get('privacyV', 1) >= 2; }
+    function noPersonal() { return !request.resource.data.keys().hasAny(['name', 'nick', 'photo', 'height', 'birthYear']); }
 
     match /users/{u} {
       allow read, write: if signedIn() && me() == u;
+      // Lista de amigos de cada um (nome e foto pequena), para sugestões de "amigo de fulano".
+      match /amigos/{f} {
+        allow read: if signedIn() && (me() == u || areFriends(me(), u));
+        allow create, update: if signedIn() && (me() == u || me() == f) && areFriends(u, f);
+        allow delete: if signedIn() && (me() == u || me() == f);
+      }
+    }
+
+    // Amizades: valem para o app inteiro.
+    match /friendships/{f} {
+      allow read: if signedIn() && me() in resource.data.users;
+      allow create: if signedIn() && me() in request.resource.data.users && request.resource.data.users.size() == 2
+        && f == request.resource.data.users[0] + '_' + request.resource.data.users[1]
+        && memberOf(request.resource.data.turma, request.resource.data.users[0])
+        && memberOf(request.resource.data.turma, request.resource.data.users[1])
+        && (
+          (request.resource.data.status == 'pending' && request.resource.data.from == me())
+          || (request.resource.data.status == 'accepted' && request.resource.data.via == 'convite' && (
+                (request.resource.data.users[0] == me() && request.resource.data.k == get(/databases/$(database)/documents/turmas/$(request.resource.data.turma)/convites/$(request.resource.data.users[1])).data.token)
+                || (request.resource.data.users[1] == me() && request.resource.data.k == get(/databases/$(database)/documents/turmas/$(request.resource.data.turma)/convites/$(request.resource.data.users[0])).data.token)))
+          || (request.resource.data.status == 'accepted' && request.resource.data.via == 'turma'
+              && request.resource.data.k == turmaDoc(request.resource.data.turma).data.inviteCode
+              && turmaDoc(request.resource.data.turma).data.ownerUid in request.resource.data.users)
+          || (request.resource.data.status == 'accepted' && request.resource.data.via == 'migracao'
+              && turmaDoc(request.resource.data.turma).data.ownerUid == me())
+        );
+      allow update: if signedIn() && me() in resource.data.users && resource.data.status == 'pending' && resource.data.from != me()
+        && request.resource.data.status == 'accepted' && changed().hasOnly(['status', 'acceptedAt']);
+      allow delete: if signedIn() && me() in resource.data.users;
     }
 
     match /turmas/{t} {
@@ -36,25 +79,48 @@ service cloud.firestore {
 
       match /membros/{m} {
         allow read: if isMember(t);
-        allow create: if signedIn() && m == me() && request.resource.data.uid == me()
-          && request.resource.data.code == getAfter(/databases/$(database)/documents/turmas/$(t)).data.inviteCode;
+        allow create: if signedIn() && m == me() && request.resource.data.uid == me() && (
+          request.resource.data.code == getAfter(/databases/$(database)/documents/turmas/$(t)).data.inviteCode
+          || (request.resource.data.get('by', '') != '' && memberOf(t, request.resource.data.by)
+              && request.resource.data.code == get(/databases/$(database)/documents/turmas/$(t)/convites/$(request.resource.data.by)).data.token));
+        allow update: if isOwner(t) && changed().hasOnly(['name']) && !('name' in request.resource.data);
         allow delete: if signedIn() && (m == me() || (isAdmin(t) && m != turmaDoc(t).data.ownerUid));
+      }
+
+      // Link pessoal de convite de cada membro.
+      match /convites/{u} {
+        allow read, write: if isMember(t) && me() == u;
+        allow delete: if isOwner(t);
+      }
+
+      // Nome, apelido, foto, altura e idade: só o próprio, os amigos e o admin.
+      match /profiles/{p} {
+        allow read: if isMember(t) && (p == me() || isAdmin(t) || areFriends(me(), p) || guestOwner(t, p));
+        allow create, update: if isMember(t) && (p == me() || guestOwner(t, p) || isOwner(t));
+        allow delete: if isMember(t) && (p == me() || guestOwner(t, p) || isOwner(t));
+      }
+
+      // Cópia de segurança feita antes da mudança de privacidade: só quem criou a turma.
+      match /backups/{b} {
+        allow read, write: if isOwner(t);
       }
 
       match /players/{p} {
         allow read: if isMember(t);
-        allow create: if isMember(t) && request.resource.data.createdBy == me() && request.resource.data.get('locked', false) == false && (
+        allow create: if isMember(t) && request.resource.data.createdBy == me() && request.resource.data.get('locked', false) == false
+          && (!privacyOn(t) || noPersonal()) && (
           (p == me() && request.resource.data.ownerUid == me() && request.resource.data.guest == false)
           || (p.matches('g_.*') && request.resource.data.ownerUid == null && request.resource.data.guest == true));
-        allow update: if isMember(t) && same('ownerUid') && same('guest') && same('createdBy') && (
+        allow update: if isMember(t) && same('ownerUid') && same('guest') && same('createdBy') && (!privacyOn(t) || noPersonal()) && (
           (p == me() && !changed().hasAny(['adj']) && (resource.data.get('locked', false) == false || (same('base') && same('locked'))))
           || (resource.data.guest == true && (resource.data.createdBy == me() || isAdmin(t)))
-          || (changed().hasOnly(['locked']) && request.resource.data.locked == true));
+          || (changed().hasOnly(['locked']) && request.resource.data.locked == true)
+          || (isOwner(t) && noPersonal() && changed().hasOnly(['name', 'nick', 'photo', 'height', 'birthYear'])));
         allow delete: if isMember(t) && ((resource.data.guest == true && (resource.data.createdBy == me() || isAdmin(t))) || turmaDoc(t).data.ownerUid == me());
       }
 
       match /photos/{p} {
-        allow read: if isMember(t);
+        allow read: if isMember(t) && (p == me() || isAdmin(t) || areFriends(me(), p) || guestOwner(t, p));
         allow create, update: if isMember(t) && (p == me() || guestOwner(t, p));
         allow delete: if isMember(t) && (p == me() || guestOwner(t, p) || turmaDoc(t).data.ownerUid == me());
       }
@@ -74,6 +140,12 @@ service cloud.firestore {
               && request.resource.data.get('confirms', {}).diff(resource.data.get('confirms', {})).affectedKeys().hasOnly([me()])
               && (!(me() in request.resource.data.get('confirms', {})) || request.resource.data.confirms[me()] == resource.data.get('resultRev', 0))));
         allow delete: if isMember(t) && (resource.data.createdBy == me() || isAdmin(t));
+
+        // Nome de quem está na partida, visível só para quem pode ver a partida.
+        match /roster/{p} {
+          allow read: if isMember(t) && canSeeGame(t, gameDoc(t, g).data);
+          allow write: if isMember(t) && (p == me() || gameDoc(t, g).data.createdBy == me() || isAdmin(t));
+        }
       }
     }
   }
