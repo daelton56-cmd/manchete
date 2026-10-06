@@ -55,6 +55,23 @@ service cloud.firestore {
         && (request.resource == null || request.resource.data.keys().hasOnly(['name', 'nick', 'photo', 'keys', 'emailHash', 'updated']));
     }
 
+    // Amistosos: partidas sem turma ou de várias turmas. Não mexem em carta.
+    // Quem pode ver fica guardado na própria partida (visibleTo), montado por quem marcou.
+    match /partidas/{p} {
+      allow read: if signedIn() && (me() in resource.data.visibleTo || resource.data.createdBy == me());
+      allow create: if signedIn() && request.resource.data.createdBy == me() && me() in request.resource.data.visibleTo
+        && request.resource.data.get('votes', {}).size() == 0;
+      allow update: if signedIn() && same('createdBy') && (
+        (resource.data.createdBy == me() && same('votes') && same('conf') && same('roster'))
+        || (changed().hasOnly(['conf', 'roster']) && me() in resource.data.visibleTo
+            && request.resource.data.get('conf', []).removeAll([me()]) == resource.data.get('conf', []).removeAll([me()])
+            && request.resource.data.get('roster', {}).diff(resource.data.get('roster', {})).affectedKeys().hasOnly([me()]))
+        || (changed().hasOnly(['votes']) && inTeams(resource.data)
+            && request.resource.data.get('votes', {}).diff(resource.data.get('votes', {})).affectedKeys().hasOnly([me()])
+            && (!(me() in request.resource.data.get('votes', {})) || (request.resource.data.votes[me()] is string && request.resource.data.votes[me()] != me()))));
+      allow delete: if signedIn() && resource.data.createdBy == me();
+    }
+
     // Amizades: valem para o app inteiro.
     match /friendships/{f} {
       allow read: if signedIn() && me() in resource.data.users;

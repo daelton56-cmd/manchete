@@ -860,7 +860,7 @@ const S = {
   ui: { tab: 'jogos', gameId: null, step: null, selP: null, swapSel: null, sort: 'ovr', rankSort: 'ovr', openRep: null, flash: '', sheet: null, form: null, pendingRender: false },
   migrateOffer: false,
   me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false,
-  rawPersonal: new Set(), friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
+  rawPersonal: new Set(), partidas: {}, friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
 };
 const FBM = () => !!window.MANCHETE_FIREBASE;
 const FB = () => FBM() && S.mode === 'cloud' && !!S.me && !!S.turmaId;
@@ -1226,7 +1226,7 @@ function stopListening() {
   for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } }
   for (const m of [S.social.profiles, S.social.rosters]) { for (const off of m.values()) { try { off(); } catch (e) { } } m.clear(); }
 }
-function resetData() { S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
+function resetData() { S.partidasOn = false; S.partidas = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
 function bootFirebase() {
   S.mode = 'auth-wait'; S.invite = readInvite(); render();
   const go = () => { if (S.authOff) return; S.authOff = window.MCloud.onAuth(u => onAuthChange(u)); };
@@ -1271,7 +1271,7 @@ function openTurma(t) {
     if (S.pendingAutoFriend) runAutoFriend();
     if (S.firmData) runPrivacyMigration();
   }, () => lostTurma()));
-  startSocial(); loadMyTurmas();
+  startSocial(); loadMyTurmas(); startPartidas();
   S.unsubs.push(window.MCloud.watchMembers(t, list => { const m = {}; for (const x of list) if (x && x.uid) m[x.uid] = x; S.members = m; dirty(); render(); }, () => { }));
   subscribe();
   setTimeout(() => { if (S.mode === 'loading-cloud' && S.turmaId === t) { S.loadErr = true; render(); } }, 20000);
@@ -1493,6 +1493,7 @@ function viewHTML() {
   if (S.mode === 'no-turma') return noTurmaView();
   const g = curGame();
   if (g) return g.status === 'encerrado' ? finalView(g) : gameView(g);
+  if (S.ui.partidaId && S.partidas[S.ui.partidaId]) return partidaView(S.partidas[S.ui.partidaId]);
   if (S.ui.tab === 'elenco') return elencoView();
   if (S.ui.tab === 'ranking') return rankingView();
   return agendaView();
@@ -1552,6 +1553,7 @@ function agendaView() {
   if (!up[0]) h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${canCreate() ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
   if (up.length > 1) h += section('Próximos', listBox(up.slice(1).map(gameRow)));
   if (canCreate() && up[0]) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="newGame">${ICON.plus}Marcar outro jogo</button></div>`;
+  h += partidasSection();
   if (past.length) h += section('Anteriores', listBox(past.slice(0, 40).map(gameRow)));
   if (!Object.keys(S.players).length && S.canWrite) h += `<div class="empty" style="margin-top:20px"><h3>Cadastre a galera</h3><p class="sub">Cada jogador ganha uma carta. Depois é só confirmar presença e sortear os times.</p><button class="btn" data-act="newPlayer">${ICON.plus}Novo jogador</button></div>`;
   return h;
@@ -1957,6 +1959,9 @@ function renderSheet() {
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
+  else if (s.type === 'agendaP') { const p = S.partidas[s.id]; if (!p) return closeSheet(); title = 'Adicionar à agenda'; body = agendaHTML(p); }
+  else if (s.type === 'pinvite') { const p = S.partidas[s.id]; if (!p) return closeSheet(); title = 'Convidar'; body = partidaInviteHTML(p); }
+  else if (s.type === 'peditar') { const p = S.partidas[s.id]; if (!p) return closeSheet(); title = 'Editar amistoso'; body = `<label class="field"><span>Dia</span><input class="input" type="date" id="fDate" value="${esc(p.date)}"></label><div class="grid2"><label class="field"><span>Horário</span><input class="input" type="time" id="fTime" value="${esc(p.time)}"></label><label class="field"><span>Vagas</span><input class="input" type="number" inputmode="numeric" id="fMax" value="${p.max || ''}" placeholder="Sem limite"></label></div><label class="field"><span>Local</span><input class="input" id="fPlace" maxlength="80" value="${esc(p.place)}"></label><label class="field"><span>Observação</span><textarea class="input" id="fNote" maxlength="300">${esc(p.note)}</textarea></label><div id="fErr" class="err" role="alert"></div><button class="btn btn-block btn-ball" data-act="savePartidaEdit" data-id="${esc(p.id)}">Salvar</button>`; }
   else if (s.type === 'agenda') { const g = S.games[s.gameId]; if (!g) return closeSheet(); title = 'Adicionar à agenda'; body = agendaHTML(g); }
   else if (s.type === 'turmas') { title = 'Suas turmas'; body = myTurmasList(S.turmaId) + `<div style="display:grid;gap:10px;margin-top:12px"><button class="btn btn-block" data-act="newTurma">${ICON.plus}Nova turma</button></div><p class="sub small" style="margin-top:10px">Cada turma é um vôlei com as próprias cartas, jogos e ranking.</p>`; }
   else if (s.type === 'unfriend') { const nm = nameOf(s.uid); title = 'Desfazer amizade'; body = `<p>${esc(nm)} sai da sua aba Amigos e você sai da dele. Se vocês jogaram juntos recentemente, continuam aparecendo em Jogou recentemente.</p><div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-danger" data-act="unfriend" data-uid="${esc(s.uid)}">Desfazer amizade</button><button class="btn btn-block btn-ghost" data-act="closeSheet">Cancelar</button></div>`; }
@@ -2037,10 +2042,58 @@ function gameFormHTML(id) {
   <label class="field"><span>Vagas</span><input class="input" type="number" inputmode="numeric" min="0" max="60" id="fMax" value="${d.max || ''}" placeholder="Sem limite"></label></div>
   <label class="field"><span>Local</span><input class="input" type="text" id="fPlace" maxlength="80" value="${esc(d.place)}" placeholder="Ex.: Ginásio do bairro, quadra 2"></label>
   <label class="field"><span>Observação</span><textarea class="input" id="fNote" maxlength="300" placeholder="Ex.: levar bola, valor da quadra">${esc(d.note)}</textarea></label>
+  ${FB() && !g ? whereField() : ''}
   ${FB() ? visField(g) : ''}
   <div id="fErr" class="err" role="alert"></div>
   <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-ball" data-act="saveGame" data-id="${esc(id || '')}">${g ? 'Salvar jogo' : 'Marcar jogo'}</button>
   ${g ? `<button class="btn btn-block btn-danger" data-act="askDeleteGame" data-id="${esc(id)}">Apagar jogo</button>` : ''}</div>`;
+}
+async function createElsewhere(el, where) {
+  const date = $('#fDate').value, time = $('#fTime').value || '20:00';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { $('#fErr').textContent = 'Escolha o dia do jogo.'; return; }
+  const max = clamp(parseInt($('#fMax').value, 10) || 0, 0, 60), place = $('#fPlace').value.trim().slice(0, 80), note = $('#fNote').value.trim().slice(0, 300);
+  const visBtn = document.querySelector('[data-act="gVis"][aria-pressed="true"]');
+  let vis = visBtn ? visBtn.dataset.v : 'amigos';
+  if (!where.length && vis === 'turma') vis = 'amigos';
+  el.disabled = true;
+  try {
+    if (where.length === 1) {
+      // Uma turma só, mas não a que está aberta: o jogo vai para lá e mexe nas cartas de lá.
+      const t = where[0], g = cleanGame(uid('g'), { date, time, max, place, note, vis, allowed: vis === 'privada' ? [meId()] : [], created: Date.now(), createdBy: meId(), track: ['saq', 'rec'], nTeams: 2 });
+      const data = clone(g); delete data.conf; delete data.confirms; delete data.votes;
+      await window.MCloud.db(t).doc('games/' + g.id).set(data);
+      closeSheet(); toast(`Jogo marcado na turma ${(S.myTurmas || []).find(x => x.id === t)?.name || ''}.`);
+      return;
+    }
+    const names = {}; for (const t of where) names[t] = ((S.myTurmas || []).find(x => x.id === t) || {}).name || 'Turma';
+    let aud = new Set([meId()]);
+    if (vis === 'turma' || (vis === 'amigos' && where.length)) {
+      const members = new Set();
+      for (const t of where) for (const u of await window.MCloud.listMembers(t)) members.add(u);
+      if (vis === 'turma') members.forEach(u => aud.add(u)); else for (const f of friendIds()) if (members.has(f)) aud.add(f);
+    } else if (vis === 'amigos') for (const f of friendIds()) aud.add(f);
+    const id = uid('p');
+    const data = { turmas: where, turmaNames: names, vis, allowed: vis === 'privada' ? [meId()] : [], visibleTo: [...aud], createdBy: meId(), date, time, max, place, note, status: 'agendado', conf: [], teams: null, sets: [], votes: {}, roster: {}, created: Date.now() };
+    await window.MCloud.partidaCreate(id, data);
+    S.partidas[id] = cleanPartida(id, data);
+    closeSheet(); S.ui.partidaId = id; S.ui.gameId = null; render(); window.scrollTo(0, 0);
+    toast(vis === 'privada' ? 'Amistoso marcado. Agora toque em Convidar e escolha quem vai.' : 'Amistoso marcado.');
+  } catch (e) { el.disabled = false; $('#fErr').textContent = 'Não consegui marcar agora. Confira a internet e tente de novo.'; }
+}
+function whereField() {
+  const list = (S.myTurmas && S.myTurmas.length ? S.myTurmas : [{ id: S.turmaId, name: (S.turma && S.turma.name) || 'Turma' }]);
+  return `<div class="field"><span>Onde</span><div class="row-wrap">${list.map(t => `<button class="chip" data-act="gWhere" data-t="${esc(t.id)}" aria-pressed="${t.id === S.turmaId}">${esc(t.name || 'Turma')}</button>`).join('')}</div>
+    <p class="sub small" id="gWhereHint" style="margin-top:8px" hidden></p></div>`;
+}
+function syncWhere() {
+  const sel = [...document.querySelectorAll('[data-act="gWhere"][aria-pressed="true"]')];
+  const hint = $('#gWhereHint'), turmaBtn = document.querySelector('[data-act="gVis"][data-v="turma"]');
+  if (hint) { hint.hidden = sel.length === 1; hint.textContent = !sel.length ? 'Sem turma: vira amistoso, não mexe nas cartas. Escolha Só amigos ou Só convidados.' : 'Entre turmas: vira amistoso, não mexe nas cartas.'; }
+  if (turmaBtn) {
+    turmaBtn.hidden = !sel.length; turmaBtn.textContent = sel.length > 1 ? 'Todas as turmas' : 'Toda a turma';
+    const grp = turmaBtn.parentElement; if (grp) grp.style.gridTemplateColumns = sel.length ? '1fr 1fr 1fr' : '1fr 1fr';
+    if (!sel.length && turmaBtn.getAttribute('aria-pressed') === 'true') { const a = document.querySelector('[data-act="gVis"][data-v="amigos"]'); if (a) ACT.gVis(a); }
+  }
 }
 function visField(g) {
   const vis = g ? g.vis : 'turma';
@@ -2624,7 +2677,7 @@ function startSocial() {
   if (!FBM() || !window.MCloud.watchFriendships) return;
   S.unsubs.push(window.MCloud.watchFriendships(meId(), list => {
     const m = {}; for (const f of list || []) if (f && f.id && Array.isArray(f.users)) m[f.id] = f;
-    S.friendships = m; dirty(); syncSocial(); healMirrors(); render(); renderNotifBadge();
+    S.friendships = m; S.friendsReady = true; dirty(); syncSocial(); healMirrors(); render(); renderNotifBadge(); refreshAudience();
   }, () => { }));
   S.unsubs.push(window.MCloud.watchMirrors(meId(), list => {
     const m = {}; for (const x of list || []) if (x && x.uid) m[x.uid] = cleanProfile(x);
@@ -2792,6 +2845,120 @@ function saveProfile(id) {
   return Promise.all(jobs).catch(() => toast('Não consegui salvar o perfil. Tente de novo.'));
 }
 
+// ---------- Amistosos: partidas sem turma ou de várias turmas (não mexem em carta) ----------
+function cleanPartida(id, d) {
+  d = d || {};
+  const ids = v => (Array.isArray(v) ? v.filter(x => typeof x === 'string' && x.length < 80).slice(0, 500) : []);
+  const roster = {}; if (d.roster && typeof d.roster === 'object') for (const [k, v] of Object.entries(d.roster)) roster[k] = basicFrom(v);
+  const votes = {}; if (d.votes && typeof d.votes === 'object') for (const [k, v] of Object.entries(d.votes)) if (typeof v === 'string' && v !== k) votes[k] = v;
+  const names = {}; if (d.turmaNames && typeof d.turmaNames === 'object') for (const [k, v] of Object.entries(d.turmaNames)) names[k] = String(v || '').slice(0, 40);
+  return {
+    id, kind: 'partida', turmas: ids(d.turmas).slice(0, 6), turmaNames: names,
+    vis: ['turma', 'amigos', 'privada'].includes(d.vis) ? d.vis : 'amigos', allowed: ids(d.allowed), visibleTo: ids(d.visibleTo),
+    createdBy: typeof d.createdBy === 'string' ? d.createdBy : '',
+    date: /^\d{4}-\d{2}-\d{2}$/.test(d.date || '') ? d.date : todayStr(), time: /^\d{2}:\d{2}$/.test(d.time || '') ? d.time : '20:00',
+    place: String(d.place || '').slice(0, 80), note: String(d.note || '').slice(0, 300), max: clamp(Math.round(Number(d.max) || 0), 0, 60),
+    status: d.status === 'encerrado' ? 'encerrado' : 'agendado', conf: ids(d.conf),
+    teams: Array.isArray(d.teams) && d.teams.length === 2 ? d.teams.map(ids) : null,
+    sets: Array.isArray(d.sets) ? d.sets.slice(0, 9).map(x => ({ pa: Number.isFinite(x && x.pa) ? x.pa : null, pb: Number.isFinite(x && x.pb) ? x.pb : null })) : [],
+    votes, roster, created: Number(d.created) || 0
+  };
+}
+function startPartidas() {
+  if (!FBM() || !window.MCloud.watchPartidas || S.partidasOn) return;
+  S.partidasOn = true;
+  S.unsubs.push(window.MCloud.watchPartidas(meId(), list => {
+    const m = {}; for (const x of list || []) if (x && x.id) m[x.id] = cleanPartida(x.id, x);
+    S.partidas = m;
+    for (const p of Object.values(m)) for (const [u, x] of Object.entries(p.roster)) if (!S.publicProfiles[u]) S.publicProfiles[u] = x;
+    dirty(); render(); refreshAudience();
+  }, () => { S.partidasOn = false; }));
+}
+const partidaWhere = p => (p.turmas.length ? p.turmas.map(t => p.turmaNames[t] || 'Turma').join(' + ') : 'Sem turma');
+const partidaVisTxt = p => (p.vis === 'turma' ? (p.turmas.length > 1 ? 'Todas as turmas' : 'Toda a turma') : p.vis === 'amigos' ? 'Só amigos' : 'Só convidados');
+const pnName = (p, u) => { const r = p.roster[u]; if (r && r.name) return r.nick || r.name; return personName(u) || 'Alguém'; };
+const pnInfo = (p, u) => p.roster[u] || personalOf(u) || { name: 'Alguém' };
+const myPartida = p => p.createdBy === meId();
+const pSetsWon = p => { let a = 0, b = 0; for (const x of p.sets) { if (x.pa == null || x.pb == null || x.pa === x.pb) continue; if (x.pa > x.pb) a++; else b++; } return [a, b]; };
+const pHasResult = p => p.teams && p.sets.some(x => x.pa != null && x.pb != null && x.pa !== x.pb);
+const pVoters = p => (p.teams ? p.teams.flat() : []);
+const pVoteOpen = p => pHasResult(p) && pVoters(p).length >= 2 && todayStr() <= addDays(p.date, 2) && Object.keys(p.votes).filter(u => pVoters(p).includes(u)).length < pVoters(p).length;
+function pTally(p) { const c = {}, vs = pVoters(p); for (const [u, x] of Object.entries(p.votes)) if (vs.includes(u) && vs.includes(x) && x !== u) c[x] = (c[x] || 0) + 1; return c; }
+function partidaRow(p) {
+  const d = parseDate(p.date), going = p.conf.includes(meId()), won = pSetsWon(p);
+  const pill = pHasResult(p) && pVoteOpen(p) && pVoters(p).includes(meId()) && !p.votes[meId()] ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Vote no MVP</span>'
+    : going ? '<span class="pill pill-done">Você vai</span>' : `<span class="pill">${plural(p.conf.length, 'confirmado', 'confirmados')}</span>`;
+  return `<button class="item" data-act="openPartida" data-id="${esc(p.id)}"><div class="date-block"><span class="num">${d.getDate()}</span><span>${MESES[d.getMonth()]}</span></div><div class="item-main"><div class="item-title">${esc(fmtDay(p.date))}, ${esc(fmtTime(p.time))}</div><div class="item-sub">Amistoso, ${esc(partidaWhere(p))}${p.place ? '. ' + esc(p.place) : ''}${pHasResult(p) ? `<br>Placar: Amarelo ${won[0]} x ${won[1]} Azul` : ''}</div></div>${pill}</button>`;
+}
+function partidasSection() {
+  if (!FBM()) return '';
+  const all = Object.values(S.partidas).sort(byDate), t = todayStr();
+  const up = all.filter(p => p.status !== 'encerrado' && p.date >= t), past = all.filter(p => !up.includes(p)).reverse().slice(0, 8);
+  if (!up.length && !past.length) return '';
+  let h = '';
+  if (up.length) h += section('Amistosos', listBox(up.map(partidaRow)) + '<p class="sub small" style="margin-top:8px">Partidas sem turma ou entre turmas. Não mexem nas cartas.</p>');
+  if (past.length) h += section('Amistosos anteriores', listBox(past.map(partidaRow)));
+  return h;
+}
+function partidaView(p) {
+  const mine = myPartida(p), going = p.conf.includes(meId()), canGo = p.visibleTo.includes(meId());
+  const won = pSetsWon(p);
+  let h = `<div class="row" style="margin:14px 0 4px"><button class="btn btn-sm btn-ghost" data-act="closePartida">‹ Jogos</button><span class="spacer"></span>${mine ? `<button class="btn btn-sm" data-act="editPartida" data-id="${esc(p.id)}">Editar</button>` : ''}</div>`;
+  h += `<div class="game-title" style="margin-top:6px">${esc(fmtDay(p.date))}, ${esc(fmtTime(p.time))}</div><div class="sub">${esc(p.place || 'Local a definir')}</div>`;
+  h += `<div class="row-wrap" style="margin:10px 0"><span class="pill">Amistoso: não mexe nas cartas</span><span class="pill">${esc(partidaWhere(p))}</span><span class="pill">${esc(partidaVisTxt(p))}</span></div>`;
+  if (p.note) h += `<p class="sub" style="margin:0 0 8px">${esc(p.note)}</p>`;
+  h += `<p class="sub">Marcado por ${esc(pnName(p, p.createdBy))}. ${plural(p.conf.length, 'confirmado', 'confirmados')}${p.max ? ` para ${p.max} vagas` : ''}.</p>`;
+  if (canGo && p.status !== 'encerrado' && !pHasResult(p)) h += `<div style="margin:10px 0"><button class="btn btn-block ${going ? '' : 'btn-ball'}" data-act="partidaGo" data-id="${esc(p.id)}">${going ? 'Desmarcar' : 'Vou jogar'}</button></div>`;
+  h += `<div class="row-wrap" style="margin:6px 0 4px"><button class="btn btn-sm" data-act="partidaShare" data-id="${esc(p.id)}">${ICON.copy}Mandar no WhatsApp</button><button class="btn btn-sm" data-act="openAgendaP" data-id="${esc(p.id)}">${ICON.cal}Agendar</button>${mine && p.vis === 'privada' ? `<button class="btn btn-sm btn-ball" data-act="partidaInvite" data-id="${esc(p.id)}">${ICON.plus}Convidar</button>` : ''}</div>`;
+  if (p.conf.length) h += section('Quem vai', listBox(p.conf.map((u, i) => `<div class="pres"><span class="num" style="width:22px;color:var(--muted)">${i + 1}</span>${avatar(pnInfo(p, u))}<div class="item-main"><div class="item-title">${esc(pnName(p, u))}${u === meId() ? ' (você)' : ''}</div>${p.max && i >= p.max ? '<div class="item-sub"><span class="wait">Espera</span></div>' : ''}</div>${u !== meId() && canFriend(u) && friendState(u) !== 'friend' ? friendBtn(u) : ''}</div>`)));
+  if (mine && p.conf.length >= 4 && !pHasResult(p)) h += `<div style="margin-top:12px"><button class="btn btn-block ${p.teams ? '' : 'btn-ball'}" data-act="partidaDraw" data-id="${esc(p.id)}">${p.teams ? 'Sortear de novo' : 'Sortear os times'}</button></div>`;
+  if (p.teams) h += section('Times', `<div class="grid2">${p.teams.map((t, i) => `<div class="team-col"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span></div>${listBox(t.map(u => `<div class="pres"><div class="item-main"><div class="item-title">${esc(pnName(p, u))}</div></div></div>`))}</div>`).join('')}</div>`);
+  if (p.teams) {
+    let sh = p.sets.length ? listBox(p.sets.map((x, i) => `<div class="pres"><span class="sub small" style="width:46px">Set ${i + 1}</span><span class="team-dot" style="background:${TEAMS[0].c}"></span>${mine ? `<input class="input score" inputmode="numeric" data-input="pScore" data-id="${esc(p.id)}" data-i="${i}" data-f="pa" value="${x.pa ?? ''}" aria-label="Pontos do amarelo no set ${i + 1}">` : `<b class="num">${x.pa ?? '–'}</b>`}<span class="sub">x</span>${mine ? `<input class="input score" inputmode="numeric" data-input="pScore" data-id="${esc(p.id)}" data-i="${i}" data-f="pb" value="${x.pb ?? ''}" aria-label="Pontos do azul no set ${i + 1}">` : `<b class="num">${x.pb ?? '–'}</b>`}<span class="team-dot" style="background:${TEAMS[1].c}"></span>${mine ? `<button class="icon-btn" data-act="pDelSet" data-id="${esc(p.id)}" data-i="${i}" aria-label="Apagar o set ${i + 1}">${ICON.x}</button>` : ''}</div>`)) : '<p class="sub">Nenhum set ainda.</p>';
+    if (mine) sh += `<div style="margin-top:10px"><button class="btn btn-block" data-act="pAddSet" data-id="${esc(p.id)}">${ICON.plus}Adicionar set</button></div>`;
+    if (pHasResult(p)) sh += `<div class="total">Amarelo ${won[0]} x ${won[1]} Azul</div>`;
+    h += section('Placar', sh);
+  }
+  if (pHasResult(p)) {
+    const vs = pVoters(p), open = pVoteOpen(p), nV = Object.keys(p.votes).filter(u => vs.includes(u)).length;
+    let vh = '';
+    if (open && vs.includes(meId())) vh += `<p class="sub" style="margin:-4px 0 10px">${p.votes[meId()] ? `Você votou em <b>${esc(pnName(p, p.votes[meId()]))}</b>.` : 'Quem jogou mais? O resultado aparece quando a votação fechar.'} ${nV} de ${vs.length} já votaram.</p>` + listBox(vs.filter(u => u !== meId()).map(u => `<div class="pres">${avatar(pnInfo(p, u))}<div class="item-main"><div class="item-title">${esc(pnName(p, u))}</div></div><button class="toggle" data-act="partidaVote" data-id="${esc(p.id)}" data-pid="${esc(u)}" aria-pressed="${p.votes[meId()] === u}">${p.votes[meId()] === u ? 'Seu voto' : 'Votar'}</button></div>`));
+    else if (open) vh += `<p class="sub">${nV} de ${vs.length} já votaram.</p>`;
+    else { const t = pTally(p), max = Math.max(0, ...Object.values(t)), w = Object.keys(t).filter(k => t[k] === max && max > 0); vh += w.length ? `<p class="game-title" style="font-size:26px">${w.map(u => esc(pnName(p, u))).join(' e ')}</p><p class="sub">${max} de ${nV} votos</p>` : '<p class="sub">Ninguém votou.</p>'; }
+    h += section('MVP da galera', vh);
+  }
+  if (mine) h += `<div style="display:grid;gap:10px;margin-top:18px">${pHasResult(p) && p.status !== 'encerrado' ? `<button class="btn btn-block" data-act="partidaClose" data-id="${esc(p.id)}">Encerrar a partida</button>` : ''}<button class="btn btn-block btn-danger" data-act="askDelPartida" data-id="${esc(p.id)}">Apagar a partida</button></div>`;
+  return h;
+}
+function partidaInviteHTML(p) {
+  const known = new Map();
+  for (const [u, x] of Object.entries(S.myMirrors)) if (isFriend(u)) known.set(u, x);
+  for (const id of Object.keys(S.players)) { const q = P(id); if (q && !q.guest && q.ownerUid && id !== meId() && q.known !== false) known.set(id, q); }
+  const people = [...known.entries()].filter(([u]) => u !== meId()).sort((a, b) => (a[1].nick || a[1].name).localeCompare(b[1].nick || b[1].name, 'pt-BR'));
+  return `<p class="sub" style="margin:-4px 0 10px">Só quem estiver convidado vê a partida e confirma presença.</p>` + (people.length ? listBox(people.map(([u, x]) => { const on = p.allowed.includes(u); return `<div class="pres">${avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">${isFriend(u) ? 'Amigo' : 'Da sua turma'}</div></div><button class="toggle" data-act="pInviteToggle" data-id="${esc(p.id)}" data-uid="${esc(u)}" aria-pressed="${on}">${on ? 'Convidado' : 'Convidar'}</button></div>`; })) : '<p class="sub">Ainda não tem ninguém para convidar. Adicione amigos pelo Elenco.</p>');
+}
+// Quem marcou mantém a lista de quem pode ver em dia: gente nova na turma ou amigos novos passam a ver.
+const AUD_DONE = new Set();
+async function refreshAudience() {
+  if (!FB() || !S.friendsReady || !window.MCloud.listMembers) return;
+  const t = todayStr();
+  for (const p of Object.values(S.partidas)) {
+    if (!myPartida(p) || p.status === 'encerrado' || p.date < t || p.vis === 'privada' || AUD_DONE.has(p.id)) continue;
+    AUD_DONE.add(p.id);
+    try {
+      const aud = new Set([meId(), ...p.conf]);
+      if (p.vis === 'turma' || (p.vis === 'amigos' && p.turmas.length)) {
+        const members = new Set();
+        for (const tt of p.turmas) for (const u of await window.MCloud.listMembers(tt)) members.add(u);
+        if (p.vis === 'turma') members.forEach(u => aud.add(u)); else for (const f of friendIds()) if (members.has(f)) aud.add(f);
+      } else for (const f of friendIds()) aud.add(f);
+      const next = [...aud];
+      if (next.length !== p.visibleTo.length || next.some(u => !p.visibleTo.includes(u))) { p.visibleTo = next; savePartida(p); }
+    } catch (e) { }
+  }
+}
+function savePartida(p) { if (!window.MCloud.partidaSave) return; window.MCloud.partidaSave(p.id, JSON.parse(JSON.stringify(p))).catch(() => toast('Não consegui salvar a partida. Tente de novo.')); }
+
 // ---------- Presença no modo com conta: muda só a própria linha, sem sobrescrever a dos outros ----------
 function presenceSet(g, id, on) {
   if (on) { if (!g.conf.includes(id)) g.conf.push(id); }
@@ -2950,7 +3117,7 @@ function keepFormInputs(fn) {
 // ---------- Ações ----------
 const ACT = {
   tab: el => { S.ui.tab = el.dataset.tab; S.ui.gameId = null; render(); window.scrollTo(0, 0); setTimeout(healViewport, 50); if (S.ui.tab === 'elenco') loadFof(); },
-  home: () => { S.ui.gameId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
+  home: () => { S.ui.gameId = null; S.ui.partidaId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
   help: () => openSheet({ type: 'help' }),
   closeSheet: () => closeSheet(),
   elencoTab: el => { S.ui.elencoRecent = el.dataset.v === 'recentes'; render(); },
@@ -3136,8 +3303,12 @@ const ACT = {
   step: el => { S.ui.step = el.dataset.step; S.ui.swapSel = null; render(); window.scrollTo(0, 0); },
   newGame: () => openSheet({ type: 'gameForm' }),
   editGame: () => { const g = curGame(); if (g && canEditGame(g)) openSheet({ type: 'gameForm', id: g.id }); },
+  gWhere: el => { el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')); syncWhere(); },
   saveGame: el => {
     const date = $('#fDate').value, time = $('#fTime').value || '20:00';
+    const whereBtns = [...document.querySelectorAll('[data-act="gWhere"]')];
+    const where = whereBtns.filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.t);
+    if (!el.dataset.id && FB() && whereBtns.length && (where.length !== 1 || where[0] !== S.turmaId)) return createElsewhere(el, where);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { $('#fErr').textContent = 'Escolha o dia do jogo.'; return; }
     const max = clamp(parseInt($('#fMax').value, 10) || 0, 0, 60);
     const place = $('#fPlace').value.trim().slice(0, 80), note = $('#fNote').value.trim().slice(0, 300);
@@ -3163,6 +3334,53 @@ const ACT = {
     const hint = $('#gVisHint'); if (hint) hint.hidden = el.dataset.v !== 'privada';
   },
   gAllow: el => el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')),
+  openPartida: el => { if (!S.partidas[el.dataset.id]) return; if (S.ui.sheet) closeSheet(); S.ui.partidaId = el.dataset.id; S.ui.gameId = null; render(); window.scrollTo(0, 0); },
+  closePartida: () => { S.ui.partidaId = null; render(); window.scrollTo(0, 0); },
+  partidaGo: el => {
+    const p = S.partidas[el.dataset.id]; if (!p) return;
+    const on = !p.conf.includes(meId());
+    if (on) p.conf = p.conf.concat(meId()); else p.conf = p.conf.filter(x => x !== meId());
+    if (on) p.roster[meId()] = myBasic(); else delete p.roster[meId()];
+    render();
+    window.MCloud.partidaPresence(p.id, meId(), on, myBasic()).then(() => toast(on ? 'Presença confirmada.' : 'Presença desmarcada.')).catch(() => toast('Não consegui salvar a presença. Tente de novo.'));
+  },
+  partidaDraw: el => {
+    const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p) || p.conf.length < 4) return;
+    const r = balanceTeams(p.conf.map(u => ({ id: u, ovr: P(u) ? ovrOf(P(u)) : 60, pos: P(u) ? P(u).pos : 'cor', pos2: P(u) ? P(u).pos2 : [] })), 2);
+    p.teams = r.teams; p.sets = []; savePartida(p); render(); toast('Times sorteados.');
+  },
+  pAddSet: el => { const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p)) return; p.sets.push({ pa: null, pb: null }); savePartida(p); render(); },
+  pDelSet: el => { const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p)) return; p.sets.splice(Number(el.dataset.i), 1); savePartida(p); render(); },
+  partidaVote: el => {
+    const p = S.partidas[el.dataset.id], u = el.dataset.pid; if (!p || !pVoteOpen(p) || !pVoters(p).includes(meId()) || u === meId()) return;
+    p.votes = Object.assign({}, p.votes, { [meId()]: u }); render();
+    window.MCloud.partidaVote(p.id, meId(), u).then(() => toast(`Voto em ${pnName(p, u)} registrado.`)).catch(() => toast('Não consegui registrar o voto.'));
+  },
+  partidaClose: el => { const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p)) return; p.status = 'encerrado'; savePartida(p); render(); toast('Partida encerrada.'); },
+  askDelPartida: el => { const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p)) return; openSheet({ type: 'confirm', title: 'Apagar a partida?', text: 'A partida some para todo mundo. Como é amistoso, nenhuma carta muda.', ok: 'Apagar', run: () => { closeSheet(); window.MCloud.partidaDelete(p.id).then(() => { delete S.partidas[p.id]; S.ui.partidaId = null; render(); toast('Partida apagada.'); }).catch(() => toast('Não consegui apagar.')); } }); },
+  partidaShare: async el => {
+    const p = S.partidas[el.dataset.id]; if (!p) return;
+    const names = p.conf.map((u, i) => `${i + 1}. ${pnName(p, u)}`).join('\n');
+    const text = `🏐 Vôlei (amistoso): ${fmtDay(p.date)}, ${fmtTime(p.time)}\n📍 ${p.place || 'Local a definir'}\nConfirma pelo app: ${location.origin}${location.pathname}\n${names ? '\nConfirmados:\n' + names : ''}`;
+    try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+    copyText(text);
+  },
+  openAgendaP: el => { const p = S.partidas[el.dataset.id]; if (p) openSheet({ type: 'agendaP', id: p.id }); },
+  partidaInvite: el => { const p = S.partidas[el.dataset.id]; if (p && myPartida(p)) openSheet({ type: 'pinvite', id: p.id }); },
+  pInviteToggle: el => {
+    const p = S.partidas[el.dataset.id], u = el.dataset.uid; if (!p || !myPartida(p)) return;
+    if (p.allowed.includes(u)) { p.allowed = p.allowed.filter(x => x !== u); p.visibleTo = p.visibleTo.filter(x => x !== u || x === p.createdBy); }
+    else { p.allowed = p.allowed.concat(u); p.visibleTo = [...new Set(p.visibleTo.concat(u))]; }
+    savePartida(p); renderSheet(); render();
+  },
+  editPartida: el => { const p = S.partidas[el.dataset.id]; if (p && myPartida(p)) openSheet({ type: 'peditar', id: p.id }); },
+  savePartidaEdit: el => {
+    const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p)) return;
+    const date = $('#fDate').value, time = $('#fTime').value || '20:00';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { $('#fErr').textContent = 'Escolha o dia do jogo.'; return; }
+    Object.assign(p, { date, time, max: clamp(parseInt($('#fMax').value, 10) || 0, 0, 60), place: $('#fPlace').value.trim().slice(0, 80), note: $('#fNote').value.trim().slice(0, 300) });
+    savePartida(p); closeSheet(); render(); toast('Partida salva.');
+  },
   askDeleteGame: el => canEditGame(S.games[el.dataset.id]) && openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda e, se tinha placar, as cartas voltam a ficar como se ele não tivesse acontecido.', ok: 'Apagar jogo', danger: true, run: () => { delete S.games[el.dataset.id]; persist('games', el.dataset.id); S.ui.gameId = null; closeSheet(); render(); toast('Jogo apagado.'); } }),
   confirmOk: () => { const s = S.ui.sheet; if (s && s.run) s.run(); },
   togglePres: el => {
@@ -3495,6 +3713,11 @@ function numCheck(el, leaving) {
   if (leaving && raw === '') { el.value = formValue(a); el.classList.remove('bad'); if (er) er.textContent = ''; }
 }
 const INP = {
+  pScore: el => {
+    const p = S.partidas[el.dataset.id], i = Number(el.dataset.i); if (!p || !myPartida(p) || !p.sets[i]) return;
+    const v = el.value.trim() === '' ? null : clamp(parseInt(el.value, 10) || 0, 0, 99);
+    p.sets[i][el.dataset.f] = v; clearTimeout(INP._pt); INP._pt = setTimeout(() => savePartida(p), 500);
+  },
   peopleQ: el => { S.ui.peopleQ = el.value.slice(0, 80); showLocalHits(); clearTimeout(SEARCH_T); SEARCH_T = setTimeout(runSearch, 350); },
   pname: () => updateFormPreview(),
   num: el => numCheck(el, false)
@@ -3595,6 +3818,15 @@ window.MCloud = {
   getPublicProfile: uid => guard(getDoc(doc(fs, 'perfisPublicos', uid)).then(s => (s.exists() ? { uid: s.id, ...s.data() } : null))),
   searchPeople: ({ key, emailHash }) => guard(getDocs(query(collection(fs, 'perfisPublicos'), emailHash ? where('emailHash', '==', emailHash) : where('keys', 'array-contains', key), limit(20)))
     .then(s => s.docs.map(d => ({ uid: d.id, ...d.data() })))),
+  // ---------- Amistosos (partidas sem turma ou de várias turmas) ----------
+  watchPartidas: (uid, next, error) => onSnapshot(query(collection(fs, 'partidas'), where('visibleTo', 'array-contains', uid)), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
+  partidaCreate: (id, data) => guard(setDoc(doc(fs, 'partidas', id), data)),
+  // Quem marcou atualiza a partida sem tocar em presença, nomes e votos dos outros.
+  partidaSave: (id, data) => { const d = { ...data }; delete d.conf; delete d.votes; delete d.roster; return guard(setDoc(doc(fs, 'partidas', id), d, { mergeFields: Object.keys(d) })); },
+  partidaPresence: (id, uid, on, info) => guard(updateDoc(doc(fs, 'partidas', id), on ? { conf: arrayUnion(uid), [`roster.${uid}`]: info } : { conf: arrayRemove(uid), [`roster.${uid}`]: deleteField() })),
+  partidaVote: (id, uid, pid) => guard(updateDoc(doc(fs, 'partidas', id), { [`votes.${uid}`]: pid })),
+  partidaDelete: id => guard(deleteDoc(doc(fs, 'partidas', id))),
+  listMembers: t => guard(getDocs(collection(fs, 'turmas', t, 'membros')).then(s => s.docs.map(d => d.id))),
   // ---------- Amizades ----------
   watchFriendships: (uid, next, error) => onSnapshot(query(collection(fs, 'friendships'), where('users', 'array-contains', uid)), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
   friendSet: (id, data) => guard(setDoc(doc(fs, 'friendships', id), data)),
