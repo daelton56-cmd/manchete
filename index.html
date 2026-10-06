@@ -1654,9 +1654,15 @@ function elencoSocial() {
     : filter === 'amigos' ? `<div class="empty"><h3>Nenhum amigo nesta turma ainda</h3><p class="sub">Toque na faixa amarela das cartas para adicionar quem você conhece.</p></div>`
     : `<div class="empty"><h3>Só você por aqui</h3><p class="sub">Mande o seu link para a galera. Quem entrar já chega como seu amigo.</p></div>`;
   else h += cardsGrid(ps, filter === 'recentes' ? (p => `<div class="sub small" style="text-align:center">${cnt.get(p.id) === 1 ? '1 jogo juntos' : (cnt.get(p.id) || 0) + ' jogos juntos'}</div>`) : null, { addBar: true });
+  // Quem já está na turma mas ainda não criou a carta.
+  const noCard = filter ? [] : Object.keys(S.members).filter(u => u !== meId() && !S.players[u]);
+  if (noCard.length) {
+    fetchMemberNames();
+    h += section('Entraram e ainda não criaram a carta', listBox(noCard.map(u => { const pi = personalOf(u); const nm = pi && pi.name ? (pi.nick || pi.name) : 'Alguém novo'; return `<div class="pres">${avatar(pi || { name: nm })}<div class="item-main"><div class="item-title">${esc(nm)}</div><div class="item-sub">Está na turma, falta criar a carta</div></div>${friendBtn(u)}</div>`; })) + '<p class="sub small" style="margin-top:8px">Assim que a pessoa criar a carta, ela aparece junto com a galera.</p>');
+  }
   h += `<p class="sub small" style="margin-top:14px">${filter === 'recentes' ? 'Quem jogou com você nas suas últimas 10 partidas.' : filter === 'amigos' ? 'Seus amigos nesta turma.' : 'Todo mundo desta turma. Quem ainda não é seu amigo tem a faixa amarela na carta para adicionar.'}</p>`;
   if (filter !== 'recentes') {
-    const outside = Object.entries(S.myMirrors).filter(([u]) => !S.players[u] && isFriend(u));
+    const outside = Object.entries(S.myMirrors).filter(([u]) => !S.players[u] && !S.members[u] && isFriend(u));
     if (outside.length) h += section('Amigos de outras turmas', listBox(outside.map(([u, x]) => `<div class="pres">${avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">Ainda não está nesta turma</div></div><button class="btn btn-sm" data-act="shareInvite">Chamar</button></div>`)));
   }
   return h;
@@ -2455,7 +2461,17 @@ function friendState(u) {
 }
 const friendIds = () => Object.values(S.friendships).filter(f => f.status === 'accepted' && f.users).map(f => f.users.find(x => x !== meId())).filter(Boolean);
 const hasAccount = id => { const p = S.players[id]; return !!(p && !p.guest && p.ownerUid); };
-const canFriend = id => FB() && !!id && id !== meId() && !String(id).startsWith('g_') && (hasAccount(id) || !!S.publicProfiles[id]);
+const canFriend = id => FB() && !!id && id !== meId() && !String(id).startsWith('g_') && (hasAccount(id) || !!S.publicProfiles[id] || !!S.members[id]);
+// Quem entrou na turma e ainda não criou a carta: busca o nome na vitrine pública.
+const NAME_ASKED = new Set();
+function fetchMemberNames() {
+  if (!FB() || !window.MCloud.getPublicProfile) return;
+  for (const u of Object.keys(S.members)) {
+    if (u === meId() || S.players[u] || personalOf(u) || NAME_ASKED.has(u)) continue;
+    NAME_ASKED.add(u);
+    window.MCloud.getPublicProfile(u).then(d => { if (d && d.name) { S.publicProfiles[u] = basicFrom(d); dirty(); render(); } }).catch(() => { });
+  }
+}
 const smallPhoto = ph => (typeof ph === 'string' && PHOTO_RE.test(ph) && ph.length < 200000 ? ph : '');
 function cleanProfile(d) {
   d = d || {};
@@ -3576,6 +3592,7 @@ window.MCloud = {
   },
   // ---------- Busca de pessoas ----------
   setPublicProfile: (uid, data) => guard(setDoc(doc(fs, 'perfisPublicos', uid), data)),
+  getPublicProfile: uid => guard(getDoc(doc(fs, 'perfisPublicos', uid)).then(s => (s.exists() ? { uid: s.id, ...s.data() } : null))),
   searchPeople: ({ key, emailHash }) => guard(getDocs(query(collection(fs, 'perfisPublicos'), emailHash ? where('emailHash', '==', emailHash) : where('keys', 'array-contains', key), limit(20)))
     .then(s => s.docs.map(d => ({ uid: d.id, ...d.data() })))),
   // ---------- Amizades ----------
