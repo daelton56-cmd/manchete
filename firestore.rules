@@ -6,7 +6,7 @@ service cloud.firestore {
     function turmaDoc(t) { return get(/databases/$(database)/documents/turmas/$(t)); }
     function isMember(t) { return signedIn() && exists(/databases/$(database)/documents/turmas/$(t)/membros/$(me())); }
     function memberOf(t, u) { return exists(/databases/$(database)/documents/turmas/$(t)/membros/$(u)); }
-    function isAdmin(t) { return signedIn() && me() in turmaDoc(t).data.admins; }
+    function isAdmin(t) { return isMember(t) && me() in turmaDoc(t).data.admins; }
     function isOwner(t) { return signedIn() && turmaDoc(t).data.ownerUid == me(); }
     function same(f) { return request.resource.data.get(f, null) == resource.data.get(f, null); }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
