@@ -319,6 +319,13 @@ td .num{font-size:18px}
 .pst-mute{background:var(--line); color:var(--muted)}
 .pst-dash{background:var(--surface); border:1px dashed var(--line-strong); color:var(--ink)}
 .ptag{border:1px solid var(--line); border-radius:999px; padding:3px 9px; font-weight:600; font-size:12px; color:var(--muted); white-space:nowrap}
+.ab-card{background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:14px; display:flex; flex-direction:column; gap:10px; text-align:left; color:var(--ink); width:100%; box-sizing:border-box}
+.ab-btn{font:inherit}
+.ab-list{display:grid; gap:10px}
+.ab-when{font-family:var(--display); font-weight:800; font-size:22px; line-height:1}
+.ab-strip{display:flex; gap:10px; overflow-x:auto; padding-bottom:4px; scroll-snap-type:x mandatory}
+.ab-mini{min-width:220px; scroll-snap-align:start; background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:12px; display:flex; flex-direction:column; gap:6px; text-align:left; color:var(--ink); font:inherit}
+.ab-badge{display:inline-flex; min-width:20px; height:20px; border-radius:10px; background:var(--ball); color:var(--ball-ink); font-size:12px; font-weight:700; align-items:center; justify-content:center; margin-left:6px; padding:0 6px}
 .link-btn{padding:0; color:var(--ink); font-weight:700; text-decoration:underline; text-underline-offset:2px; font-size:inherit}
 .turma-switch{display:inline-flex; align-items:center; gap:6px; padding:0; color:var(--ink)}
 .turma-switch svg{width:22px; height:22px; margin-top:2px}
@@ -885,6 +892,7 @@ const ICON = {
   help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.2-1 .7-1 1.3v.6M12 17v.2"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   x: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  pin: svg('<path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/>'),
   copy: svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
   undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   paste: svg('<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/>'),
@@ -906,7 +914,7 @@ const S = {
   ui: { tab: 'jogos', gameId: null, step: null, selP: null, swapSel: null, sort: 'ovr', rankSort: 'ovr', openRep: null, flash: '', sheet: null, form: null, pendingRender: false },
   migrateOffer: false,
   me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false,
-  rawPersonal: new Set(), partidas: {}, pagos: {}, friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
+  rawPersonal: new Set(), partidas: {}, pagos: {}, abertos: {}, pedidosOrg: {}, pedidosMeus: {}, myPedidosIdx: {}, geo: null, friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
 };
 const FBM = () => !!window.MANCHETE_FIREBASE;
 const FB = () => FBM() && S.mode === 'cloud' && !!S.me && !!S.turmaId;
@@ -928,6 +936,7 @@ function cleanPlayer(id, d) {
     level: LEVELS[d.level] ? d.level : null,
     ownerUid: typeof d.ownerUid === 'string' ? d.ownerUid : null,
     guest: d.guest === true,
+    visitor: typeof d.visitor === 'string' ? d.visitor.slice(0, 80) : '',
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : null,
     locked: d.locked === true,
     height: typeof d.height === 'number' && d.height >= 120 && d.height <= 230 ? Math.round(d.height) : null,
@@ -995,7 +1004,8 @@ function cleanGame(id, d) {
     serie: typeof d.serie === 'string' ? d.serie.slice(0, 80) : '',
     seq: Math.max(0, Math.round(numOr(d.seq, 0))),
     prev: typeof d.prev === 'string' ? d.prev.slice(0, 120) : '',
-    repeat: d.repeat === true
+    repeat: d.repeat === true,
+    aberto: cleanAbertoCfg(d.aberto)
   };
   const idxMap = o => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && v >= 0 && v <= 60) r[k] = Math.round(v); return r; };
   g.join = idxMap(d.join); g.leave = idxMap(d.leave);
@@ -1297,7 +1307,7 @@ function stopListening() {
   for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } }
   for (const m of [S.social.profiles, S.social.rosters]) { for (const off of m.values()) { try { off(); } catch (e) { } } m.clear(); }
 }
-function resetData() { S.partidasOn = false; S.partidas = {}; S.pagos = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
+function resetData() { stopAbertos(); S.abertos = {}; S.pedidosOrg = {}; S.pedidosMeus = {}; S.ui.abertoId = null; S.partidasOn = false; S.partidas = {}; S.pagos = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
 function bootFirebase() {
   S.mode = 'auth-wait'; S.invite = readInvite(); render();
   const go = () => { if (S.authOff) return; S.authOff = window.MCloud.onAuth(u => onAuthChange(u)); };
@@ -1313,6 +1323,7 @@ async function onAuthChange(u) {
   const ud = await window.MCloud.getUser(u.uid).catch(() => null);
   if (S.pendingName) S.me.name = S.pendingName; else if (ud && ud.name) S.me.name = ud.name;
   S.userTourDone = !!(ud && ud.tourDone);
+  S.myPedidosIdx = (ud && ud.pedidos && typeof ud.pedidos === 'object') ? ud.pedidos : {};
   syncPublicProfile();
   S.notifSeenCloud = (ud && ud.notifSeen) || 0;
   S.pendingName = '';
@@ -1342,7 +1353,7 @@ function openTurma(t) {
     if (S.pendingAutoFriend) runAutoFriend();
     if (S.firmData) runPrivacyMigration();
   }, () => lostTurma()));
-  startSocial(); loadMyTurmas(); startPartidas();
+  startSocial(); loadMyTurmas(); startPartidas(); startAbertos();
   S.unsubs.push(window.MCloud.watchMembers(t, list => { const m = {}; for (const x of list) if (x && x.uid) m[x.uid] = x; S.members = m; dirty(); render(); }, () => { }));
   subscribe();
   setTimeout(() => { if (S.mode === 'loading-cloud' && S.turmaId === t) { S.loadErr = true; render(); } }, 20000);
@@ -1524,6 +1535,14 @@ function notifData() {
     if (g.createdBy !== me && g.status !== 'encerrado' && g.date >= today && g.created) news.push({ kind: g.vis === 'privada' && g.allowed.includes(me) ? 'invite' : 'game', g, uid: g.createdBy, t: g.created });
     if (galeraMvp(g).includes(me)) news.push({ kind: 'mvp', g, t: new Date(voteCloseDate(g) + 'T23:00').getTime() });
   }
+  if (FBM()) {
+    for (const [gid, m] of Object.entries(S.pedidosOrg)) for (const pe of Object.values(m || {})) if (pe.status === 'pendente' && S.games[gid]) act.push({ kind: 'pedido', g: S.games[gid], pe, t: pe.at || 0 });
+    for (const [gid, pe] of Object.entries(S.pedidosMeus)) {
+      const a = S.abertos[gid];
+      if (pe.convite && pe.convite.link && pe.status === 'aprovado') act.push({ kind: 'conviteTurma', gid, pe, t: pe.convite.at || 0 });
+      if (a && (pe.status === 'aprovado' || pe.status === 'recusado') && pe.decidedAt) news.push({ kind: pe.status === 'aprovado' ? 'pedOk' : 'pedNo', a, t: pe.decidedAt });
+    }
+  }
   if (payOn()) {
     const d = myPayDue();
     if (d && d.st.st === 'pend' && todayStr() >= addDays(payKeyVenc(d.key), -3)) act.push({ kind: 'pay', d, t: 1 });
@@ -1541,6 +1560,8 @@ function renderNotifBadge() { if (FB()) renderTop(); }
 // Nome para as notificações: nunca "Jogador removido" para quem acabou de entrar.
 function personName(u) { const p = P(u); if (p && p.known !== false && p.name && p.name !== 'Jogador') return p.nick || p.name; const pi = personalOf(u); return pi && pi.name ? (pi.nick || pi.name) : ''; }
 function todoRow(a) {
+  if (a.kind === 'pedido') return `<div class="pres"><div class="item-main"><div class="item-title">${esc(a.pe.nick || a.pe.name || 'Alguém')} pediu vaga</div><div class="item-sub">Jogo de ${esc(fmtDay(a.g.date).toLowerCase())}, ${esc(fmtTime(a.g.time))}</div></div><button class="btn btn-sm btn-ball" data-act="openGame" data-id="${esc(a.g.id)}">Ver</button></div>`;
+  if (a.kind === 'conviteTurma') return `<div class="pres"><div class="item-main"><div class="item-title">Chamaram você para a turma ${esc(a.pe.convite.n || '')}</div><div class="item-sub">Depois do jogo aberto</div></div><button class="btn btn-sm btn-ball" data-act="abEntrarTurma" data-id="${esc(a.gid)}">Entrar</button></div>`;
   if (a.kind === 'pay') { const d = a.d, late = todayStr() > payKeyVenc(d.key); return `<div class="pres"><div class="item-main"><div class="item-title">${esc(d.key.startsWith('m:') ? 'Mensalidade de ' + mesNome(d.key.slice(2)) : payKeyLabel(d.key))}</div><div class="item-sub">${money(d.valor)}, ${late ? 'em atraso' : 'vence dia ' + payCfg().venc}</div></div><button class="btn btn-sm btn-ball" data-act="payGo">Pagar</button></div>`; }
   if (a.kind === 'payClaim') { const c = a.c; return `<div class="pres"><div class="item-main"><div class="item-title">${esc(nameOf(c.pid))} avisou que pagou</div><div class="item-sub">${esc(payKeyLabel(c.key))}, ${money(payKeyValor(c.pid, c.key))}</div></div><button class="btn btn-sm btn-ball" data-act="paySheet" data-pid="${esc(c.pid)}" data-key="${esc(c.key)}">Conferir</button></div>`; }
   return `<div class="pres"><div class="item-main"><div class="item-title">${a.kind === 'confirm' ? 'Confirme o placar' : 'Vote no MVP da galera'}</div><div class="item-sub">Jogo de ${esc(fmtDay(a.g.date).toLowerCase())}</div></div><button class="btn btn-sm btn-ball" data-act="${a.kind === 'confirm' ? 'openGame' : 'openVote'}" data-id="${esc(a.g.id)}">${a.kind === 'confirm' ? 'Abrir' : 'Votar'}</button></div>`;
@@ -1555,6 +1576,8 @@ function notifsHTML() {
   if (sug.length) h += section('Sugestões para você', sugRow(sug));
   const text = n => {
     if (n.kind === 'acc') return `${fn(n.uid)} aceitou seu pedido de amizade.`;
+    if (n.kind === 'pedOk') return `${esc(n.a.orgName)} aprovou seu pedido: jogo de ${esc(fmtDay(n.a.date).toLowerCase())}, ${esc(fmtTime(n.a.time))}.`;
+    if (n.kind === 'pedNo') return `Seu pedido para o jogo de ${esc(fmtDay(n.a.date).toLowerCase())} não foi aprovado.`;
     if (n.kind === 'admin') return `${fn(n.uid)} te promoveu a admin do ${esc((S.turma && S.turma.name) || 'turma')}.`;
     if (n.kind === 'joined') return personName(n.uid) ? `${fn(n.uid)} entrou pelo seu convite. Vocês já são amigos.` : 'Alguém novo entrou pelo seu convite. Vocês já são amigos, e a carta aparece no Elenco quando a pessoa criar.';
     if (n.kind === 'invite') return `${fn(n.uid)} te convidou para uma partida privada, ${esc(fmtDay(n.g.date).toLowerCase())}.`;
@@ -1580,6 +1603,7 @@ function viewHTML() {
   const g = curGame();
   if (g) return g.status === 'encerrado' ? finalView(g) : gameView(g);
   if (S.ui.partidaId && S.partidas[S.ui.partidaId]) return partidaView(S.partidas[S.ui.partidaId]);
+  if (S.ui.abertoId && S.abertos[S.ui.abertoId]) return abertoView(S.abertos[S.ui.abertoId]);
   if (S.ui.tab === 'elenco') return elencoView();
   if (S.ui.tab === 'ranking') return rankingView();
   return agendaView();
@@ -1633,8 +1657,15 @@ function agendaView() {
   const up = all.filter(g => g.status !== 'encerrado' && g.date >= t).sort(byDate);
   const toVote = all.filter(needsMyVote).sort(byDate).reverse()[0];
   const past = all.filter(g => !(g.status !== 'encerrado' && g.date >= t)).sort((a, b) => byDate(b, a));
-  let h = banners() + payCardHTML();
+  let h = banners();
+  if (FBM()) {
+    const n = abertosNovos().length, tab = S.ui.homeTab || 'minhas';
+    h += `<div class="seg seg-full ab-tabs" role="tablist" style="grid-template-columns:1fr 1fr;margin:12px 0 4px"><button role="tab" data-act="homeTab" data-v="minhas" aria-pressed="${tab !== 'abertas'}">Minhas partidas</button><button role="tab" data-act="homeTab" data-v="abertas" aria-pressed="${tab === 'abertas'}">Abertas perto${n ? `<span class="ab-badge">${n}</span>` : ''}</button></div>`;
+    if (tab === 'abertas') return h + abertasHTML();
+  }
+  h += payCardHTML();
   if (up[0]) h += heroHTML(up[0]);
+  if (FBM()) h += abertoStripHTML() + abertoVouHTML();
   if (toVote) h += voteBanner(toVote);
   if (!up[0]) h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${canCreate() ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
   if (up.length > 1) h += section('Próximos', listBox(up.slice(1).map(gameRow)));
@@ -1844,7 +1875,7 @@ function presencaStep(g, confN) {
   const paid = g.paid.filter(id => confSet.has(id)).length;
   let h = `<p class="sub" style="margin:12px 0">${confN ? `${plural(confN, 'confirmado', 'confirmados')}${g.max ? ` para ${g.max} vagas` : ''}${wait ? `, ${wait} na espera` : ''}${paid ? `. ${paid} já ${paid === 1 ? 'pagou' : 'pagaram'}` : ''}.` : 'Toque em confirmar para quem vai jogar. A ordem de confirmação vira a ordem de chegada.'}</p>`;
   if (FB() && g.vis === 'privada') h += `<p class="sub small" style="margin:-4px 0 10px">Partida privada: ${plural(g.allowed.filter(u => u !== g.createdBy).length, 'convidado', 'convidados')} além de quem marcou.</p>`;
-  h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><button class="btn btn-sm" data-act="openAgenda">${ICON.cal}Agendar</button></div>`;
+  h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><button class="btn btn-sm" data-act="openAgenda">${ICON.cal}Agendar</button>${FBM() && W && !g.aberto && g.status !== 'encerrado' ? '<button class="btn btn-sm" data-act="abrirVagas">Abrir vagas</button>' : ''}</div>` + abertoAdminHTML(g);
   const row = (p, i, on) => `<div class="pres">
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
     <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
@@ -2058,6 +2089,8 @@ function renderSheet() {
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
+  else if (s.type === 'abrir') { const g = S.games[s.gid]; if (!g || !canEditGame(g)) return closeSheet(); title = g.aberto ? 'Vagas abertas' : 'Abrir vagas'; body = abrirHTML(g); setTimeout(abPrevUpdate, 0); }
+  else if (s.type === 'denunciar') { title = 'Denunciar'; body = `<p class="sub" style="margin:-4px 0 12px">O que está errado neste jogo?</p><div style="display:grid;gap:8px">${['Golpe ou cobrança estranha', 'Jogo falso', 'Conteúdo ofensivo', 'Outro motivo'].map(m => `<button class="btn btn-block" data-act="abDenunciarOk" data-m="${esc(m)}">${esc(m)}</button>`).join('')}</div><p class="sub small" style="margin-top:10px">A denúncia vai só para quem cuida do app.</p>`; }
   else if (s.type === 'pay') { if (!isTurmaAdmin() || !P(s.pid)) return closeSheet(); title = 'Pagamento'; body = paySheetHTML(s.pid, s.key, s.gid); }
   else if (s.type === 'payMes') { if (!isTurmaAdmin()) return closeSheet(); title = 'Pagamentos do mês'; body = payMesHTML(s.ym || ymNow()); }
   else if (s.type === 'payCfg') { if (!isTurmaAdmin()) return closeSheet(); title = 'Pagamentos'; body = payCfgHTML(); }
@@ -2432,7 +2465,7 @@ function playerHTML(p) {
   const extra = [p.height ? `${fmtN(p.height / 100, 2)} m` : '', ageOf(p) ? `${ageOf(p)} anos` : ''].filter(Boolean).join(', ');
   h += `<p class="sub" style="text-align:center">${esc(posLabel(p))}${extra ? `, ${extra}` : ''}. Técnica ${fmtN(tecnica(p))}, forma ${fmtN(p.forma)}.</p>`;
   if (FB()) {
-    const tag = p.id === meId() ? 'Esta é a sua carta.' : p.guest ? `Convidado, cuidado por ${esc((S.members[p.createdBy] || {}).name || 'alguém da turma')}.` : (!S.members[p.id] ? 'Saiu da turma.' : '');
+    const tag = p.id === meId() ? 'Esta é a sua carta.' : p.guest && p.visitor ? 'Visitante: veio por um jogo aberto.' : p.guest ? `Convidado, cuidado por ${esc((S.members[p.createdBy] || {}).name || 'alguém da turma')}.` : (!S.members[p.id] ? 'Saiu da turma.' : '');
     if (tag) h += `<p class="sub small" style="text-align:center">${tag}</p>`;
     const role = roleOf(p.id);
     if (role) h += `<p style="text-align:center;margin:-2px 0 8px"><span class="role-pill">${role}</span></p>`;
@@ -3081,6 +3114,228 @@ async function refreshAudience() {
 }
 function savePartida(p) { if (!window.MCloud.partidaSave) return; window.MCloud.partidaSave(p.id, JSON.parse(JSON.stringify(p))).catch(() => toast('Não consegui salvar a partida. Tente de novo.')); }
 
+// ================= Jogos abertos =================
+// Um jogo de turma pode abrir vagas. A vitrine pública (coleção abertos) tem só o que quem é de fora pode ver.
+// Quem não é da turma pede a vaga; quem organiza aprova, e o visitante entra como convidado com carta própria.
+const NIVEIS = { ini: 'Iniciante', int: 'Intermediário', ava: 'Avançado', misto: 'Misto' };
+const ceil50 = v => Math.ceil((Number(v) || 0) * 2) / 2;
+function cleanAbertoCfg(a) {
+  if (!a || typeof a !== 'object' || a.on !== true) return null;
+  const n = (v, d, lo, hi) => { const x = Number(v); return Number.isFinite(x) ? clamp(x, lo, hi) : d; };
+  const p = a.preco || {};
+  return {
+    on: true, vis: a.vis === 'rede' ? 'rede' : 'todos', vagas: Math.round(n(a.vagas, 2, 1, 40)), nivel: NIVEIS[a.nivel] ? a.nivel : 'misto',
+    preco: { modo: p.modo === 'rateio' ? 'rateio' : 'fixo', valor: n(p.valor, 0, 0, 2000), custo: n(p.custo, 0, 0, 20000), minimo: Math.round(n(p.minimo, 0, 0, 60)) },
+    quadra: str(a.quadra, 60), endereco: str(a.endereco, 140),
+    lat: typeof a.lat === 'number' && Math.abs(a.lat) <= 90 ? a.lat : null, lng: typeof a.lng === 'number' && Math.abs(a.lng) <= 180 ? a.lng : null
+  };
+}
+function cleanAberto(id, d) {
+  d = d || {};
+  const cfg = cleanAbertoCfg(Object.assign({}, d, { on: true })) || {};
+  return Object.assign(cfg, {
+    id, turma: str(d.turma, 80), turmaNome: str(d.turmaNome, 40), createdBy: str(d.createdBy, 80), orgName: str(d.orgName, 40) || 'Quem organiza',
+    vis: d.vis === 'rede' ? 'rede' : 'todos', date: /^\d{4}-\d{2}-\d{2}$/.test(d.date || '') ? d.date : todayStr(), time: /^\d{2}:\d{2}$/.test(d.time || '') ? d.time : '20:00',
+    place: str(d.place, 60), max: clamp(Math.round(Number(d.max) || 0), 0, 99), conf: clamp(Math.round(Number(d.conf) || 0), 0, 199),
+    visit: clamp(Math.round(Number(d.visit) || 0), 0, 99), prazo: Number(d.prazo) || 0, congelado: Number(d.congelado) > 0 ? Number(d.congelado) : 0, updated: Number(d.updated) || 0
+  });
+}
+function abertoPreco(a) {
+  const p = a.preco || {};
+  if (p.modo === 'rateio' && p.custo > 0) {
+    const min = Math.max(1, p.minimo || 1), max = Math.max(min, a.max || min);
+    const now = a.congelado || ceil50(p.custo / clamp(a.conf || 0, min, max));
+    return { rateio: true, valor: now, teto: ceil50(p.custo / min), piso: ceil50(p.custo / max), custo: p.custo, congelado: !!a.congelado };
+  }
+  return { rateio: false, valor: p.valor || 0 };
+}
+const abertoLivres = a => Math.max(0, Math.min((a.max || 99) - (a.conf || 0), (a.vagas || 0) - (a.visit || 0)));
+function abertoPill(a) {
+  const l = abertoLivres(a);
+  return l <= 0 ? '<span class="pst pst-mute">Cheio</span>' : l === 1 ? '<span class="pst pst-warn">Última vaga</span>' : `<span class="pst pst-ok">${l} vagas</span>`;
+}
+const precoTxt = a => { const p = abertoPreco(a); if (!p.valor) return 'Grátis'; return p.rateio && !p.congelado ? `Até ${money(p.valor)}` : `${money(p.valor)} por pessoa`; };
+function kmAte(a) {
+  if (!S.geo || typeof a.lat !== 'number' || typeof a.lng !== 'number') return null;
+  const R = 6371, rad = x => x * Math.PI / 180, dLat = rad(a.lat - S.geo.lat), dLng = rad(a.lng - S.geo.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(S.geo.lat)) * Math.cos(rad(a.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const fmtKm = d => d < 1 ? `${Math.max(50, Math.round(d * 20) * 50)} m` : `${fmtN(d, 1)} km`;
+const minhasTurmasIds = () => new Set([S.turmaId, ...((S.myTurmas || []).map(t => t.id))].filter(Boolean));
+const daRede = a => a.createdBy === meId() || isFriend(a.createdBy) || minhasTurmasIds().has(a.turma);
+const souDaTurmaDe = a => !!S.turmaId && a.turma === S.turmaId;
+function abertosLista() {
+  const t = todayStr(), ate = S.ui.abQuando === 'hoje' ? t : addDays(t, 7), raio = S.ui.abRaio || 10;
+  return Object.values(S.abertos).filter(a => a.date >= t && a.date <= ate && !(a.date === t && a.time < new Date().toTimeString().slice(0, 5) && false)).map(a => ({ a, km: kmAte(a), rede: daRede(a) }))
+    .filter(x => x.rede || x.km == null || raio >= 999 || x.km <= raio)
+    .sort((x, y) => (x.km ?? 9999) - (y.km ?? 9999) || byDate(x.a, y.a));
+}
+function abertosNovos() { return abertosLista().filter(x => !souDaTurmaDe(x.a) && x.a.createdBy !== meId()); }
+
+// ---------- Dados em tempo real ----------
+const AB_W = { feed: [], pedidos: new Map(), meus: new Map() };
+function startAbertos() {
+  if (!FBM() || !window.MCloud.watchAbertos || AB_W.feed.length) return;
+  const got = { todos: {}, rede: {} };
+  const merge = () => { S.abertos = Object.assign({}, got.todos, got.rede); syncAbertoWatchers(); dirty(); render(); };
+  for (const mode of ['todos', 'rede']) AB_W.feed.push(window.MCloud.watchAbertos(mode, meId(), list => { const m = {}; for (const x of list || []) if (x && x.id) m[x.id] = cleanAberto(x.id, x); got[mode] = m; merge(); }, () => { }));
+  syncAbertoWatchers();
+}
+function stopAbertos() { for (const f of AB_W.feed) try { f(); } catch (e) { } AB_W.feed = []; for (const m of [AB_W.pedidos, AB_W.meus]) { for (const off of m.values()) try { off(); } catch (e) { } m.clear(); } }
+function syncAbertoWatchers() {
+  if (!FBM() || !window.MCloud.watchPedidos) return;
+  const mine = new Set(Object.values(S.abertos).filter(a => a.createdBy === meId()).map(a => a.id));
+  for (const [gid, off] of AB_W.pedidos) if (!mine.has(gid)) { try { off(); } catch (e) { } AB_W.pedidos.delete(gid); delete S.pedidosOrg[gid]; }
+  for (const gid of mine) if (!AB_W.pedidos.has(gid)) AB_W.pedidos.set(gid, window.MCloud.watchPedidos(gid, list => { const m = {}; for (const x of list || []) if (x && x.uid) m[x.uid] = x; S.pedidosOrg[gid] = m; autoAprovar(gid); render(); if (S.ui.sheet) renderSheet(); }, () => { }));
+  for (const gid of Object.keys(S.myPedidosIdx || {})) if (!AB_W.meus.has(gid)) AB_W.meus.set(gid, window.MCloud.watchPedido(gid, meId(), x => { if (x) S.pedidosMeus[gid] = x; else delete S.pedidosMeus[gid]; render(); }, () => { }));
+}
+
+// ---------- Quem organiza ----------
+function redeIds() {
+  const s = new Set([meId(), ...friendIds(), ...Object.keys(S.members)]);
+  for (const list of Object.values(S.fofMirrors || {})) for (const u of Object.keys(list || {})) s.add(u);
+  return [...s].filter(Boolean).slice(0, 1500);
+}
+const visitantesDe = g => confOrder(g).filter(id => P(id) && P(id).visitor);
+function abertoPublico(g) {
+  const a = g.aberto, me = myBasic(), prev = S.abertos[g.id];
+  const d = { turma: S.turmaId, turmaNome: (S.turma && S.turma.name) || '', gid: g.id, createdBy: meId(), orgName: String(me.nick || me.name || 'Quem organiza').split(' ')[0],
+    vis: a.vis, rede: a.vis === 'rede' ? redeIds() : [], date: g.date, time: g.time, place: a.quadra || g.place || '', endereco: a.endereco, lat: a.lat, lng: a.lng,
+    nivel: a.nivel, preco: a.preco, vagas: a.vagas, max: g.max || 0, conf: confOrder(g).length, visit: visitantesDe(g).length, prazo: cutoffOf(g), updated: Date.now() };
+  d.congelado = prev && prev.congelado ? prev.congelado : 0;
+  if (!d.congelado && a.preco.modo === 'rateio' && Date.now() > d.prazo) d.congelado = abertoPreco(cleanAberto(g.id, d)).valor;
+  return d;
+}
+function publicarAberto(g) {
+  if (!g || !g.aberto || !window.MCloud.abertoSet) return Promise.resolve();
+  const d = abertoPublico(g); S.abertos[g.id] = cleanAberto(g.id, d);
+  return window.MCloud.abertoSet(g.id, d);
+}
+// Quem é da turma mantém a contagem de vagas em dia quando a presença muda.
+function abertoConfSync(g) {
+  if (!g || !g.aberto || !window.MCloud.abertoConf) return;
+  const pub = S.abertos[g.id];
+  if (pub && pub.createdBy === meId()) { publicarAberto(g).catch(() => { }); return; }
+  window.MCloud.abertoConf(g.id, confOrder(g).length).catch(() => { });
+}
+async function aprovarPedido(g, pe) {
+  if (!g || !pe || !canEditGame(g)) return;
+  const vid = 'g_v' + String(pe.uid).replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+  if (!S.players[vid]) {
+    const lv = LEVELS[pe.level] ? pe.level : 'exp', pos = POS[pe.pos] ? pe.pos : 'cor';
+    const p = cleanPlayer(vid, { name: pe.name || 'Visitante', nick: pe.nick || '', pos, pos2: [], level: lv, photo: pe.photo || '', base: { at: presetAt(lv, pos) }, adj: [], created: Date.now(), updated: Date.now(), ownerUid: null, guest: true, createdBy: meId(), visitor: pe.uid });
+    S.players[vid] = p; if (privacyOn()) { S.profiles[vid] = profileFrom(p); dirty(); }
+    persist('players', vid, 0, () => saveProfile(vid));
+  }
+  if (!g.conf.includes(vid)) presenceSet(g, vid, true);
+  await window.MCloud.pedidoUpdate(g.id, pe.uid, { status: 'aprovado', vid, decidedAt: Date.now() });
+  publicarAberto(g).catch(() => { });
+}
+const AUTO_OK = new Set();
+function autoAprovar(gid) {
+  const g = S.games[gid], m = S.pedidosOrg[gid] || {};
+  if (!g || !canEditGame(g)) return;
+  for (const pe of Object.values(m)) if (pe.status === 'pendente' && isFriend(pe.uid) && !AUTO_OK.has(gid + pe.uid)) { AUTO_OK.add(gid + pe.uid); aprovarPedido(g, pe).catch(() => AUTO_OK.delete(gid + pe.uid)); }
+}
+function abertoAdminHTML(g) {
+  if (!FBM() || !canEditGame(g) || !g.aberto) return '';
+  const a = g.aberto, pub = S.abertos[g.id] || cleanAberto(g.id, Object.assign({}, a, { max: g.max, conf: confOrder(g).length, visit: visitantesDe(g).length }));
+  const peds = Object.values(S.pedidosOrg[g.id] || {});
+  const pend = peds.filter(p => p.status === 'pendente').sort((x, y) => (x.at || 0) - (y.at || 0));
+  let h = `<div class="ab-card" style="margin-top:12px"><div class="row" style="gap:8px;align-items:center"><span class="pst pst-warn">Aberto</span><b>${a.vis === 'rede' ? 'Só a sua rede' : 'Todo mundo do app'}</b></div>
+    <p class="sub small" style="margin:0">${plural(a.vagas, 'vaga aberta', 'vagas abertas')} para quem é de fora, ${abertoLivres(pub)} ${abertoLivres(pub) === 1 ? 'livre' : 'livres'} agora. ${esc(precoTxt(pub))}.</p>
+    <div class="row" style="gap:8px"><button class="btn btn-sm" style="flex:1" data-act="abrirVagas">Mudar</button><button class="btn btn-sm" style="flex:1" data-act="askFecharVagas">Fechar as vagas</button></div></div>`;
+  if (pend.length) h += `<div class="pay-sec">Pedidos de vaga, ${pend.length}</div>` + listBox(pend.map(pe => `<div class="pres">${avatar(cleanProfile({ name: pe.name, photo: pe.photo }))}<div class="item-main"><div class="item-title">${esc(pe.nick || pe.name || 'Alguém')}${isFriend(pe.uid) ? ' <span class="ptag">Amigo</span>' : ''}</div><div class="item-sub">${esc(POS[pe.pos] ? POS[pe.pos].name : 'Posição livre')}${LEVELS[pe.level] ? ', ' + esc(LEVELS[pe.level].name.toLowerCase()) : ''}</div></div><button class="btn btn-sm" data-act="pedidoNo" data-uid="${esc(pe.uid)}">Recusar</button><button class="btn btn-sm btn-ball" data-act="pedidoOk" data-uid="${esc(pe.uid)}">Aprovar</button></div>`));
+  const vis = visitantesDe(g);
+  if (vis.length) {
+    h += `<div class="pay-sec">Visitantes confirmados</div>` + listBox(vis.map(id => { const p = P(id), pe = (S.pedidosOrg[g.id] || {})[p.visitor] || {}; return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">Visitante, ${esc(posLabel(p).toLowerCase())}</div></div>${pe.convite ? '<span class="ptag">Chamado</span>' : `<button class="link-btn" data-act="chamarTurma" data-uid="${esc(p.visitor)}">Chamar para a turma</button>`}</div>`; }));
+    h += '<p class="sub small" style="margin-top:6px">Visitante tem carta própria nesta turma, que muda com o jogo, mas só entra na turma se alguém chamar.</p>';
+  }
+  return h;
+}
+function abrirHTML(g) {
+  const a = g.aberto || { vis: 'todos', vagas: Math.max(1, (g.max || 12) - confOrder(g).length) || 2, nivel: 'misto', preco: { modo: 'fixo', valor: 0, custo: 0, minimo: 8 }, quadra: g.place || '', endereco: '', lat: null, lng: null };
+  const opt = (v, t, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(t)}</option>`;
+  return `<input type="hidden" id="abLat" value="${a.lat ?? ''}"><input type="hidden" id="abLng" value="${a.lng ?? ''}">
+  <div class="field"><span>Quem vê</span><div class="seg seg-full" style="grid-template-columns:1fr 1fr"><button data-act="abVis" data-v="todos" aria-pressed="${a.vis !== 'rede'}">Todo mundo do app</button><button data-act="abVis" data-v="rede" aria-pressed="${a.vis === 'rede'}">Só a minha rede</button></div></div>
+  <div class="grid2"><label class="field"><span>Vagas para abrir</span><input class="input" id="abVagas" inputmode="numeric" value="${a.vagas}"></label><label class="field"><span>Nível</span><select class="input" id="abNivel">${Object.entries(NIVEIS).map(([k, v]) => opt(k, v, a.nivel)).join('')}</select></label></div>
+  <div class="field"><span>Valor por pessoa</span><div class="seg seg-full" style="grid-template-columns:1fr 1fr"><button data-act="abModo" data-v="fixo" aria-pressed="${a.preco.modo !== 'rateio'}">Fixo</button><button data-act="abModo" data-v="rateio" aria-pressed="${a.preco.modo === 'rateio'}">Rateio da quadra</button></div></div>
+  <div id="abFixo" ${a.preco.modo === 'rateio' ? 'hidden' : ''}><label class="field"><span>Valor (R$)</span><input class="input" id="abValor" inputmode="decimal" value="${a.preco.valor || ''}" placeholder="Ex.: 15"></label></div>
+  <div id="abRateio" ${a.preco.modo === 'rateio' ? '' : 'hidden'}><div class="grid2"><label class="field"><span>Custo da quadra (R$)</span><input class="input" id="abCusto" inputmode="decimal" value="${a.preco.custo || ''}" placeholder="Ex.: 180"></label><label class="field"><span>Mínimo para jogar</span><input class="input" id="abMin" inputmode="numeric" value="${a.preco.minimo || ''}" placeholder="Ex.: 8"></label></div><p class="sub small" id="abPrev" style="margin-top:-4px"></p></div>
+  <label class="field"><span>Quadra</span><input class="input" id="abQuadra" maxlength="60" value="${esc(a.quadra)}"></label>
+  <label class="field"><span>Endereço da quadra</span><input class="input" id="abEnd" maxlength="140" value="${esc(a.endereco)}" placeholder="Rua, número, bairro"></label>
+  <div style="display:grid;gap:8px"><button class="btn btn-block" data-act="abGeo">${ICON.pin || ''}Estou na quadra: usar minha localização</button><button class="btn btn-block" data-act="abBuscar">Achar pelo endereço</button></div>
+  <p class="sub small" id="abLocMsg" style="margin-top:6px">${a.lat != null ? 'Localização da quadra marcada.' : 'Sem a localização, o jogo aparece sem a distância.'} Coloque só o endereço da quadra, nunca o de casa.</p>
+  <div id="fErr" class="err" role="alert"></div>
+  <button class="btn btn-block btn-ball" data-act="abSalvar" style="margin-top:8px">${g.aberto ? 'Salvar' : 'Publicar jogo aberto'}</button>`;
+}
+function abPrevUpdate() {
+  const el = $('#abPrev'); if (!el) return;
+  const custo = parseFloat(String(($('#abCusto') || {}).value || '').replace(',', '.')), min = parseInt(($('#abMin') || {}).value, 10), g = curGame();
+  if (!(custo > 0) || !(min > 0) || !g) { el.textContent = ''; return; }
+  const max = Math.max(min, g.max || min);
+  el.textContent = `Começa em até ${money(ceil50(custo / min))} por pessoa e cai até ${money(ceil50(custo / max))} se lotar.`;
+}
+
+// ---------- Quem quer jogar ----------
+function abertoCardHTML(x) {
+  const a = x.a, meu = S.pedidosMeus[a.id], turma = souDaTurmaDe(a);
+  const st = turma ? 'Da sua turma' : meu ? ({ pendente: 'Aguardando aprovação', aprovado: 'Você vai', recusado: 'Pedido recusado', cancelado: '' }[meu.status] || '') : '';
+  return `<button class="ab-card ab-btn" data-act="openAberto" data-id="${esc(a.id)}"><div class="row" style="align-items:center;gap:8px"><span class="ab-when">${esc(fmtDay(a.date))}, ${esc(fmtTime(a.time))}</span><span class="spacer"></span>${abertoPill(a)}</div>
+    <span class="sub small">${esc(a.place || 'Quadra')}${x.km != null ? `, ${fmtKm(x.km)}` : ''}${x.rede && !turma ? `. Organizado por ${esc(a.orgName)}` : ''}</span>
+    <span class="row" style="gap:6px;flex-wrap:wrap"><span class="ptag">${esc(NIVEIS[a.nivel] || 'Misto')}</span><span class="ptag">${esc(precoTxt(a))}</span>${st ? `<span class="ptag" style="border-color:var(--ink);color:var(--ink)">${esc(st)}</span>` : ''}</span>
+    ${a.max ? `<span class="pay-bar"><i style="width:${Math.min(100, Math.round(100 * a.conf / a.max))}%"></i></span><span class="sub small">${a.conf} de ${a.max} confirmados</span>` : ''}</button>`;
+}
+function abertasHTML() {
+  let h = '';
+  if (!S.geo) h += `<div class="ab-card" style="margin-top:12px"><b>Ver jogos perto de você</b><p class="sub small" style="margin:0">A localização serve só para calcular a distância e não é salva.</p><button class="btn btn-block btn-ball" data-act="abMinhaLoc">Usar minha localização</button></div>`;
+  else { const r = S.ui.abRaio || 10; h += `<div class="chips-line" style="margin:12px 0 0">${[5, 10, 25, 999].map(k => `<button class="chip" data-act="abRaio" data-v="${k}" aria-pressed="${r === k}">${k >= 999 ? 'Qualquer distância' : `Até ${k} km`}</button>`).join('')}</div>`; }
+  const q = S.ui.abQuando || 'semana';
+  h += `<div class="chips-line" style="margin:10px 0 0"><button class="chip" data-act="abQuando" data-v="semana" aria-pressed="${q === 'semana'}">Esta semana</button><button class="chip" data-act="abQuando" data-v="hoje" aria-pressed="${q === 'hoje'}">Hoje</button></div>`;
+  const all = abertosLista(), rede = all.filter(x => x.rede), resto = all.filter(x => !x.rede);
+  if (rede.length) h += `<div class="pay-sec">Da sua rede</div><div class="ab-list">${rede.map(abertoCardHTML).join('')}</div>`;
+  if (resto.length) h += `<div class="pay-sec">${S.geo ? 'Perto de você' : 'Outros jogos abertos'}</div><div class="ab-list">${resto.map(abertoCardHTML).join('')}</div>`;
+  if (!all.length) h += `<div class="empty"><h3>Nenhum jogo aberto ${q === 'hoje' ? 'hoje' : 'nesta semana'}</h3><p class="sub">Quando alguém abrir vagas, aparece aqui na hora. No seu jogo, o botão "Abrir vagas" fica na lista de presença.</p></div>`;
+  return h;
+}
+function abertoStripHTML() {
+  const xs = abertosNovos().slice(0, 4);
+  if (!xs.length) return '';
+  return `<div class="row" style="align-items:center;margin:18px 2px 8px"><span class="pay-sec" style="margin:0">Abertas perto de você</span><span class="spacer"></span><button class="link-btn" data-act="homeTab" data-v="abertas">Ver todas</button></div>
+    <div class="ab-strip">${xs.map(x => `<button class="ab-mini" data-act="openAberto" data-id="${esc(x.a.id)}"><span class="row" style="gap:6px;align-items:center"><b>${esc(fmtDay(x.a.date))}, ${esc(fmtTime(x.a.time))}</b></span><span class="sub small">${esc(x.a.place || 'Quadra')}${x.km != null ? `, ${fmtKm(x.km)}` : ''}</span><span class="row" style="gap:6px;align-items:center">${abertoPill(x.a)}<span class="sub small">${esc(precoTxt(x.a))}</span></span></button>`).join('')}</div>`;
+}
+function abertoVouHTML() {
+  const xs = Object.entries(S.pedidosMeus).filter(([gid, pe]) => pe.status === 'aprovado' && S.abertos[gid] && S.abertos[gid].date >= todayStr()).map(([gid]) => S.abertos[gid]).sort(byDate);
+  if (!xs.length) return '';
+  return section('Jogos abertos em que você vai', listBox(xs.map(a => `<button class="item" data-act="openAberto" data-id="${esc(a.id)}"><div class="item-main"><div class="item-title">${esc(fmtDay(a.date))}, ${esc(fmtTime(a.time))}</div><div class="item-sub">${esc(a.place)}, organizado por ${esc(a.orgName)}</div></div><span class="pill pill-done">Você vai</span></button>`)));
+}
+function abertoView(a) {
+  const meu = S.pedidosMeus[a.id], pr = abertoPreco(a), km = kmAte(a), livres = abertoLivres(a);
+  const maps = typeof a.lat === 'number' ? `https://www.google.com/maps/search/?api=1&query=${a.lat},${a.lng}` : (a.endereco ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a.endereco)}` : '');
+  let h = `<div class="row" style="margin:14px 0 4px"><button class="btn btn-sm btn-ghost" data-act="closeAberto">‹ Abertas</button><span class="spacer"></span><button class="link-btn quiet" data-act="abDenunciar">Denunciar</button></div>
+    <div class="game-title" style="margin-top:6px">${esc(fmtDay(a.date))}, ${esc(fmtTime(a.time))}</div><div class="sub">${esc(a.place || 'Quadra')}${km != null ? `, ${fmtKm(km)}` : ''}</div>`;
+  if (maps) h += `<a class="btn btn-block" style="margin-top:12px" href="${esc(maps)}" target="_blank" rel="noopener">${ICON.pin || ''}Abrir no Maps</a>`;
+  h += `<div class="row-wrap" style="margin:12px 0"><span class="ptag">${esc(NIVEIS[a.nivel] || 'Misto')}</span><span class="ptag">${a.vis === 'rede' ? 'Só para a rede' : 'Aberto a todos'}</span><span class="ptag">Vale para a carta</span></div>`;
+  h += listBox([`<div class="pres">${avatar(cleanProfile({ name: a.orgName }))}<div class="item-main"><div class="item-title">${esc(a.orgName)} organiza</div><div class="item-sub">${a.turmaNome ? 'Jogo da turma ' + esc(a.turmaNome) : 'Jogo de turma'}</div></div></div>`]);
+  if (pr.rateio) h += `<div class="ab-card" style="margin-top:12px"><span class="pay-k">Rateio da quadra, ${money(pr.custo)}</span><div class="row" style="align-items:baseline;gap:8px"><span class="pay-v num" style="font-size:34px">${pr.congelado ? money(pr.valor) : 'Até ' + money(pr.valor)}</span><span class="sub small">por pessoa</span></div>${a.max ? `<span class="pay-bar"><i style="width:${Math.min(100, Math.round(100 * a.conf / a.max))}%"></i></span>` : ''}<p class="sub small" style="margin:0">${pr.congelado ? 'O valor já congelou.' : `${a.conf} confirmados. Cai até ${money(pr.piso)} se lotar e nunca sobe. O valor congela na véspera do jogo.`}</p></div>`;
+  else h += `<div class="ab-card" style="margin-top:12px"><span class="pay-k">Valor</span><span class="pay-v num" style="font-size:34px">${pr.valor ? money(pr.valor) : 'Grátis'}</span>${pr.valor ? '<p class="sub small" style="margin:0">Por pessoa. Combine o pagamento com quem organiza.</p>' : ''}</div>`;
+  h += `<div class="ab-card" style="margin-top:12px"><div class="row"><b>${livres <= 0 ? 'Cheio' : plural(livres, 'vaga', 'vagas')}</b><span class="spacer"></span><span class="sub small">${a.max ? `${a.conf} de ${a.max}` : `${a.conf} confirmados`}</span></div><p class="sub small" style="margin:0">A lista de quem vai aparece para quem é da turma.</p></div>`;
+  if (souDaTurmaDe(a)) h += `<div style="margin-top:14px"><button class="btn btn-block btn-ball" data-act="openGame" data-id="${esc(a.id)}">Abrir jogo</button></div>`;
+  else if (a.createdBy === meId()) h += '<p class="sub" style="margin-top:14px">Você organiza este jogo. Os pedidos aparecem na lista de presença.</p>';
+  else if (!meu || meu.status === 'cancelado') h += `<div style="margin-top:14px"><button class="btn btn-block btn-ball" data-act="abPedir" data-id="${esc(a.id)}">${livres <= 0 ? 'Entrar na espera' : isFriend(a.createdBy) ? 'Vou' : 'Pedir vaga'}</button><p class="sub small" style="text-align:center;margin-top:8px">${isFriend(a.createdBy) ? `Como você é amigo de ${esc(a.orgName)}, a confirmação é automática.` : 'Quem organiza aprova. Você recebe o aviso no sino.'}</p></div>`;
+  else if (meu.status === 'pendente') h += `<div class="ab-card" style="margin-top:14px"><b>Aguardando aprovação</b><p class="sub small" style="margin:0">${esc(a.orgName)} vai ver o seu pedido. O aviso chega no sino.</p><button class="btn btn-block" data-act="abCancelar" data-id="${esc(a.id)}">Cancelar pedido</button></div>`;
+  else if (meu.status === 'aprovado') h += `<div class="ab-card" style="margin-top:14px"><span class="pst pst-ok" style="align-self:flex-start">${CHECK_SVG}Você está na lista</span><p class="sub small" style="margin:0">Você joga como visitante da turma, com carta própria. Para desistir, avise ${esc(a.orgName)}.</p>${meu.convite && meu.convite.link ? `<button class="btn btn-block btn-ball" data-act="abEntrarTurma" data-id="${esc(a.id)}">Entrar na turma ${esc(meu.convite.n || '')}</button>` : ''}</div>`;
+  else if (meu.status === 'recusado') h += '<div class="ab-card" style="margin-top:14px"><b>Pedido não aprovado</b><p class="sub small" style="margin:0">Dessa vez não deu. Outros jogos abertos aparecem na aba Abertas perto.</p></div>';
+  return h;
+}
+function getGeo() {
+  return new Promise((ok, no) => {
+    if (!navigator.geolocation) return no(new Error('sem'));
+    navigator.geolocation.getCurrentPosition(p => ok({ lat: p.coords.latitude, lng: p.coords.longitude }), e => no(e), { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
+  });
+}
+
 // ================= Pagamentos =================
 // A configuração fica na turma: os admins gravam e a turma toda lê (valores e chave Pix, que é preciso para pagar).
 // A situação de cada pessoa fica numa ficha privada (coleção partidas, kind 'pago') que só ela e os admins leem.
@@ -3291,7 +3546,7 @@ function presencaPay(g) {
     h += `<div class="chips-line" style="margin:12px 0 2px"><button class="chip" data-act="payFilter" data-v="" aria-pressed="${!f}">Todos</button><button class="chip" data-act="payFilter" data-v="due" aria-pressed="${f === 'due'}">Devendo, ${due}</button><button class="chip" data-act="payFilter" data-v="told" aria-pressed="${f === 'told'}">Avisaram, ${told}</button></div>`;
   } else h += `<p class="sub" style="margin:12px 0">${spots.length ? `${plural(spots.length, 'confirmado', 'confirmados')}${g.max ? ` para ${g.max} vagas` : ''}${wait.length ? `, ${wait.length} na espera` : ''}.` : 'Ninguém confirmou ainda.'}</p>`;
   if (FB() && g.vis === 'privada') h += `<p class="sub small" style="margin:6px 0 10px">Partida privada: ${plural(g.allowed.filter(u => u !== g.createdBy).length, 'convidado', 'convidados')} além de quem marcou.</p>`;
-  h += `<div class="row-wrap" style="margin:10px 0 4px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><button class="btn btn-sm" data-act="openAgenda">${ICON.cal}Agendar</button></div>`;
+  h += `<div class="row-wrap" style="margin:10px 0 4px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><button class="btn btn-sm" data-act="openAgenda">${ICON.cal}Agendar</button>${W && !g.aberto && g.status !== 'encerrado' ? '<button class="btn btn-sm" data-act="abrirVagas">Abrir vagas</button>' : ''}</div>` + abertoAdminHTML(g);
   const f = S.ui.payFilter || '';
   const show = id => !admin || !f || (f === 'due' ? charged(id) && payState(id, key(id)).st === 'pend' : charged(id) && payState(id, key(id)).st === 'avisou');
   const kind = id => P(id).guest ? 'convidado' : (mens.has(id) ? 'mensalista' : 'avulso');
@@ -3401,6 +3656,7 @@ function presenceSet(g, id, on) {
     S.rosters[g.id] = Object.assign({}, S.rosters[g.id] || {}, { [id]: r });
     S.db.setRoster(g.id, id, r).catch(() => { });
   }
+  if (g.aberto) setTimeout(() => abertoConfSync(g), 300);
   S.db.presence(g.id, id, on).catch(e => { toast(e && e.code === 'permission-denied' ? 'Você não tem permissão para isso.' : 'Não consegui salvar a presença. Tente de novo.'); resync(); });
   if (paidChanged) persist('games', g.id);
 }
@@ -3551,7 +3807,7 @@ function keepFormInputs(fn) {
 // ---------- Ações ----------
 const ACT = {
   tab: el => { S.ui.tab = el.dataset.tab; S.ui.gameId = null; render(); window.scrollTo(0, 0); setTimeout(healViewport, 50); if (S.ui.tab === 'elenco') loadFof(); },
-  home: () => { S.ui.gameId = null; S.ui.partidaId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
+  home: () => { S.ui.gameId = null; S.ui.partidaId = null; S.ui.abertoId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
   help: () => openSheet({ type: 'help' }),
   closeSheet: () => closeSheet(),
   elencoTab: el => { S.ui.elencoRecent = el.dataset.v === 'recentes'; render(); },
@@ -3725,6 +3981,62 @@ const ACT = {
     try { await window.MCloud.deleteAccount(pass); closeSheet(); toast('Sua conta foi apagada.'); }
     catch (e) { err.textContent = e && e.code === 'auth/invalid-credential' || e && e.code === 'auth/wrong-password' ? 'Senha não confere.' : 'Não consegui apagar agora. Confira a internet e tente de novo.'; el.disabled = false; }
   },
+  homeTab: el => { S.ui.homeTab = el.dataset.v === 'abertas' ? 'abertas' : 'minhas'; render(); window.scrollTo(0, 0); },
+  abRaio: el => { S.ui.abRaio = Number(el.dataset.v) || 10; render(); },
+  abQuando: el => { S.ui.abQuando = el.dataset.v === 'hoje' ? 'hoje' : 'semana'; render(); },
+  abMinhaLoc: async () => { try { S.geo = await getGeo(); render(); } catch (e) { toast('Não consegui pegar a localização. Confira a permissão do navegador.'); } },
+  openAberto: el => { const id = el.dataset.id; if (!S.abertos[id]) return; if (S.ui.sheet) closeSheet(); if (souDaTurmaDe(S.abertos[id]) && S.games[id]) return ACT.openGame(el); S.ui.abertoId = id; S.ui.gameId = null; render(); window.scrollTo(0, 0); },
+  closeAberto: () => { S.ui.abertoId = null; S.ui.homeTab = 'abertas'; render(); window.scrollTo(0, 0); },
+  abPedir: async el => {
+    const a = S.abertos[el.dataset.id]; if (!a || !FBM()) return;
+    const me = myBasic(), card = P(meId());
+    const data = { status: 'pendente', at: Date.now(), name: me.name || 'Jogador', nick: me.nick || '', photo: smallPhoto(me.photo || ''), pos: card ? card.pos : 'cor', level: card && card.level ? card.level : 'exp', amigo: isFriend(a.createdBy) };
+    S.pedidosMeus[a.id] = Object.assign({ uid: meId() }, data); render();
+    try {
+      await window.MCloud.pedidoSet(a.id, meId(), data);
+      S.myPedidosIdx = Object.assign({}, S.myPedidosIdx, { [a.id]: { at: data.at } });
+      window.MCloud.setUser(meId(), { pedidos: { [a.id]: { at: data.at } } }).catch(() => { });
+      syncAbertoWatchers();
+      toast(data.amigo ? 'Pedido enviado. Como vocês são amigos, entra direto.' : 'Pedido enviado. Você recebe o aviso no sino.');
+    } catch (e) { delete S.pedidosMeus[a.id]; render(); toast('Não consegui pedir a vaga agora. Tente de novo.'); }
+  },
+  abCancelar: async el => { const id = el.dataset.id; try { await window.MCloud.pedidoUpdate(id, meId(), { status: 'cancelado', at: Date.now() }); if (S.pedidosMeus[id]) S.pedidosMeus[id].status = 'cancelado'; render(); toast('Pedido cancelado.'); } catch (e) { toast('Não consegui cancelar agora.'); } },
+  abEntrarTurma: el => { const pe = S.pedidosMeus[el.dataset.id]; if (pe && pe.convite && pe.convite.link) location.href = pe.convite.link; },
+  abDenunciar: () => { if (S.ui.abertoId) openSheet({ type: 'denunciar', id: S.ui.abertoId }); },
+  abDenunciarOk: async el => { const id = S.ui.sheet && S.ui.sheet.id; closeSheet(); try { await window.MCloud.denunciar({ by: meId(), gid: id || '', motivo: el.dataset.m, at: Date.now() }); toast('Denúncia enviada. Obrigado por avisar.'); } catch (e) { toast('Não consegui enviar a denúncia agora.'); } },
+  abrirVagas: () => { const g = curGame(); if (g && canEditGame(g)) openSheet({ type: 'abrir', gid: g.id }); },
+  abVis: el => { for (const b of document.querySelectorAll('[data-act="abVis"]')) b.setAttribute('aria-pressed', String(b === el)); },
+  abModo: el => { for (const b of document.querySelectorAll('[data-act="abModo"]')) b.setAttribute('aria-pressed', String(b === el)); const r = el.dataset.v === 'rateio'; $('#abFixo').hidden = r; $('#abRateio').hidden = !r; abPrevUpdate(); },
+  abGeo: async () => { const m = $('#abLocMsg'); try { const p = await getGeo(); $('#abLat').value = p.lat; $('#abLng').value = p.lng; if (m) m.textContent = 'Localização da quadra marcada. Coloque só o endereço da quadra, nunca o de casa.'; } catch (e) { if (m) m.textContent = 'Não consegui pegar a localização. Confira a permissão ou use o endereço.'; } },
+  abBuscar: async () => {
+    const q = ($('#abEnd').value || '').trim(), m = $('#abLocMsg'); if (!q) { if (m) m.textContent = 'Escreva o endereço da quadra primeiro.'; return; }
+    if (m) m.textContent = 'Procurando o endereço…';
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=' + encodeURIComponent(q), { headers: { 'Accept-Language': 'pt-BR' } });
+      const j = await r.json();
+      if (!j || !j[0]) { if (m) m.textContent = 'Não achei esse endereço. Tente com rua, número e cidade, ou use a localização na quadra.'; return; }
+      $('#abLat').value = Number(j[0].lat); $('#abLng').value = Number(j[0].lon);
+      if (m) m.textContent = `Achei: ${String(j[0].display_name || '').split(',').slice(0, 3).join(',')}.`;
+    } catch (e) { if (m) m.textContent = 'Não consegui procurar agora. Use a localização quando estiver na quadra.'; }
+  },
+  abSalvar: async el => {
+    const g = curGame() || S.games[(S.ui.sheet || {}).gid]; if (!g || !canEditGame(g)) return;
+    const num = id => { const v = parseFloat(String(($(id) || {}).value || '').replace(',', '.')); return Number.isFinite(v) ? v : 0; };
+    const vis = (document.querySelector('[data-act="abVis"][aria-pressed="true"]') || {}).dataset?.v || 'todos';
+    const modo = (document.querySelector('[data-act="abModo"][aria-pressed="true"]') || {}).dataset?.v || 'fixo';
+    const lat = parseFloat($('#abLat').value), lng = parseFloat($('#abLng').value);
+    const cfg = cleanAbertoCfg({ on: true, vis, vagas: parseInt($('#abVagas').value, 10) || 1, nivel: $('#abNivel').value, preco: { modo, valor: num('#abValor'), custo: num('#abCusto'), minimo: parseInt(($('#abMin') || {}).value, 10) || 0 }, quadra: $('#abQuadra').value.trim(), endereco: $('#abEnd').value.trim(), lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null });
+    if (!cfg.quadra) { $('#fErr').textContent = 'Coloque o nome da quadra.'; return; }
+    if (modo === 'rateio' && (!(cfg.preco.custo > 0) || cfg.preco.minimo < 2)) { $('#fErr').textContent = 'No rateio, coloque o custo da quadra e o mínimo de jogadores (pelo menos 2).'; return; }
+    el.disabled = true;
+    g.aberto = cfg; persist('games', g.id);
+    try { await publicarAberto(g); closeSheet(); render(); toast(vis === 'rede' ? 'Vagas abertas para a sua rede.' : 'Vagas abertas para todo mundo do app.'); }
+    catch (e) { el.disabled = false; $('#fErr').textContent = 'Não consegui publicar agora. Confira a internet e tente de novo.'; }
+  },
+  askFecharVagas: () => { const g = curGame(); if (!g || !canEditGame(g)) return; openSheet({ type: 'confirm', title: 'Fechar as vagas?', text: 'O jogo sai da lista de abertos. Quem já foi aprovado continua na lista.', ok: 'Fechar as vagas', run: () => { closeSheet(); g.aberto = null; persist('games', g.id); delete S.abertos[g.id]; window.MCloud.abertoDel(g.id).catch(() => { }); render(); toast('Vagas fechadas.'); } }); },
+  pedidoOk: async el => { const g = curGame(), pe = g && (S.pedidosOrg[g.id] || {})[el.dataset.uid]; if (!pe) return; try { await aprovarPedido(g, pe); toast(`${pe.nick || pe.name} entrou na lista como visitante.`); } catch (e) { toast('Não consegui aprovar agora.'); } },
+  pedidoNo: async el => { const g = curGame(); if (!g) return; try { await window.MCloud.pedidoUpdate(g.id, el.dataset.uid, { status: 'recusado', decidedAt: Date.now() }); toast('Pedido recusado.'); } catch (e) { toast('Não consegui recusar agora.'); } },
+  chamarTurma: async el => { const g = curGame(); if (!g) return; try { await window.MCloud.pedidoUpdate(g.id, el.dataset.uid, { convite: { link: inviteLink(), n: (S.turma && S.turma.name) || '', by: meId(), at: Date.now() } }); toast('Convite enviado. A pessoa vê no sino e entra quando quiser.'); } catch (e) { toast('Não consegui chamar agora.'); } },
   payFilter: el => { S.ui.payFilter = el.dataset.v || ''; render(); },
   paySheet: el => { if (!isTurmaAdmin()) return; openSheet({ type: 'pay', pid: el.dataset.pid, key: el.dataset.key, gid: S.ui.gameId || '' }); },
   payMes: el => openSheet({ type: 'payMes', ym: el.dataset.ym || ymNow() }),
@@ -4351,6 +4663,16 @@ window.MCloud = {
   getPublicProfile: uid => guard(getDoc(doc(fs, 'perfisPublicos', uid)).then(s => (s.exists() ? { uid: s.id, ...s.data() } : null))),
   searchPeople: ({ key, emailHash }) => guard(getDocs(query(collection(fs, 'perfisPublicos'), emailHash ? where('emailHash', '==', emailHash) : where('keys', 'array-contains', key), limit(20)))
     .then(s => s.docs.map(d => ({ uid: d.id, ...d.data() })))),
+  // ---------- Jogos abertos ----------
+  watchAbertos: (mode, uid, next, error) => onSnapshot(query(collection(fs, 'abertos'), mode === 'todos' ? where('vis', '==', 'todos') : where('rede', 'array-contains', uid)), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
+  abertoSet: (gid, data) => guard(setDoc(doc(fs, 'abertos', gid), data)),
+  abertoConf: (gid, conf) => guard(updateDoc(doc(fs, 'abertos', gid), { conf, updated: Date.now() })),
+  abertoDel: gid => guard(deleteDoc(doc(fs, 'abertos', gid))),
+  pedidoSet: (gid, uid, data) => guard(setDoc(doc(fs, 'abertos', gid, 'pedidos', uid), data)),
+  pedidoUpdate: (gid, uid, patch) => guard(updateDoc(doc(fs, 'abertos', gid, 'pedidos', uid), patch)),
+  watchPedidos: (gid, next, error) => onSnapshot(collection(fs, 'abertos', gid, 'pedidos'), s => next(s.docs.map(d => ({ uid: d.id, ...d.data() }))), e => error && error(fail(e))),
+  watchPedido: (gid, uid, next, error) => onSnapshot(doc(fs, 'abertos', gid, 'pedidos', uid), s => next(s.exists() ? { uid: s.id, ...s.data() } : null), e => error && error(fail(e))),
+  denunciar: data => guard(setDoc(doc(collection(fs, 'denuncias')), data)),
   // ---------- Amistosos (partidas sem turma ou de várias turmas) ----------
   watchPartidas: (uid, next, error) => onSnapshot(query(collection(fs, 'partidas'), where('visibleTo', 'array-contains', uid)), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
   partidaCreate: (id, data) => guard(setDoc(doc(fs, 'partidas', id), data)),

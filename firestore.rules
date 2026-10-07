@@ -73,6 +73,33 @@ service cloud.firestore {
     }
 
     // Amizades: valem para o app inteiro.
+    // Jogos abertos: a vitrine pública de um jogo de turma com vagas abertas.
+    // 'todos' = qualquer conta lê; 'rede' = só quem está na lista. Quem organiza grava tudo;
+    // quem é da turma só atualiza a contagem de confirmados.
+    match /abertos/{g} {
+      allow read: if signedIn() && (resource.data.vis == 'todos' || me() in resource.data.get('rede', []) || resource.data.createdBy == me());
+      allow create: if signedIn() && request.resource.data.createdBy == me() && isMember(request.resource.data.turma);
+      allow update: if signedIn() && same('createdBy') && same('turma') && (
+        resource.data.createdBy == me()
+        || (isMember(resource.data.turma) && changed().hasOnly(['conf', 'updated'])));
+      allow delete: if signedIn() && (resource.data.createdBy == me() || isAdmin(resource.data.turma));
+
+      // Pedido de vaga: só quem pediu e quem organiza leem.
+      match /pedidos/{u} {
+        allow read: if signedIn() && (me() == u || get(/databases/$(database)/documents/abertos/$(g)).data.createdBy == me());
+        allow create: if signedIn() && me() == u && request.resource.data.status == 'pendente';
+        allow update: if signedIn() && (
+          (me() == u && changed().hasOnly(['status', 'at']) && request.resource.data.status in ['pendente', 'cancelado'])
+          || get(/databases/$(database)/documents/abertos/$(g)).data.createdBy == me());
+        allow delete: if signedIn() && (me() == u || get(/databases/$(database)/documents/abertos/$(g)).data.createdBy == me());
+      }
+    }
+
+    // Denúncias: qualquer conta envia; ninguém lê pelo app (só no console do Firebase).
+    match /denuncias/{d} {
+      allow create: if signedIn() && request.resource.data.by == me();
+    }
+
     match /friendships/{f} {
       allow read: if signedIn() && me() in resource.data.users;
       allow create: if signedIn() && me() in request.resource.data.users && request.resource.data.users.size() == 2
