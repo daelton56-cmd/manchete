@@ -298,6 +298,10 @@ td .num{font-size:18px}
 .action-row + .action-row{border-top:1px solid var(--line)}
 .action-row svg{width:20px; height:20px; color:var(--muted)}
 .action-row:active{background:var(--line)}
+.stars{display:flex; gap:4px; flex:none}
+.star{width:34px; height:34px; border-radius:50%; border:1px solid var(--line); background:var(--surface); color:var(--ink); font-weight:700; font-size:14px}
+.star[aria-pressed="true"]{background:var(--ball); color:var(--ball-ink); border-color:var(--ball)}
+.rate-row .item-main{min-width:0}
 .link-btn{padding:0; color:var(--ink); font-weight:700; text-decoration:underline; text-underline-offset:2px; font-size:inherit}
 .turma-switch{display:inline-flex; align-items:center; gap:6px; padding:0; color:var(--ink)}
 .turma-switch svg{width:22px; height:22px; margin-top:2px}
@@ -529,7 +533,7 @@ function countsFromLog(log) {
   return c;
 }
 function emptyTot() {
-  const t = { jogos: 0, sets: 0, setsV: 0, mvp: 0, notaSum: 0, notaN: 0 };
+  const t = { jogos: 0, sets: 0, setsV: 0, mvp: 0, notaSum: 0, notaN: 0, galSum: 0, galN: 0 };
   for (const k of EVENT_KEYS) t[k] = 0;
   return t;
 }
@@ -575,6 +579,17 @@ function computeResult(game, playersById, opts = {}) {
   const counts = countsFromLog(game.log);
   const track = game.track || [];
   const out = {};
+  // Nota da galera: quem jogou dá de 1 a 5 para os outros. Só vale com pelo menos 2 notas.
+  const galera = {}, rates = game.rates && typeof game.rates === 'object' ? game.rates : {};
+  for (const [rater, m] of Object.entries(rates)) {
+    if (teamOf[rater] == null || !m || typeof m !== 'object') continue;
+    for (const [pid, v] of Object.entries(m)) {
+      const n = Number(v);
+      if (pid === rater || teamOf[pid] == null || !Number.isInteger(n) || n < 1 || n > 5) continue;
+      (galera[pid] = galera[pid] || []).push(n);
+    }
+  }
+  const groupTech = members.length ? members.reduce((a, pid) => a + tecnica(playersById[pid]), 0) / members.length : 60;
   for (const pid of members) {
     const p = playersById[pid];
     const c = counts[pid] || {};
@@ -592,6 +607,17 @@ function computeResult(game, playersById, opts = {}) {
         why[attr] = { net, perSet: net / sets, expected: expectedNet(attr, atBefore[attr]), d };
       }
     }
+    let gal = null;
+    const gl = galera[pid] || [];
+    if (sets > 0 && gl.length >= GALERA.min) {
+      // Puxa a técnica para perto do que a galera viu: 3 é a média do grupo, cada estrela vale alguns pontos.
+      const avg = gl.reduce((a, b) => a + b, 0) / gl.length;
+      const target = groupTech + (avg - 3) * GALERA.step;
+      const now = tecnica({ ...p, at: atAfter });
+      const d = clamp(GALERA.rate * (calib[pid] || 1) * (target - now), -GALERA.max, GALERA.max);
+      for (const a of ATTRS) atAfter[a] = r1(clamp(atAfter[a] + d, 40, 99));
+      gal = { avg: r1(avg), n: gl.length, d: r1(d) };
+    }
     const formaBefore = typeof p.forma === 'number' ? p.forma : tecnica(p);
     const formaAfter = r1(clamp(formaBefore + formaD[pid], 40, 99));
     const after = { ...p, at: atAfter, forma: formaAfter };
@@ -602,8 +628,9 @@ function computeResult(game, playersById, opts = {}) {
       const won = sw[pid], lost = sets - won;
       nota = r1(clamp(6.5 + 1.2 * sum / sets + (won - lost) / sets, 3, 10));
     }
+    if (gal) { const ng = clamp(gal.avg * 2, 2, 10); nota = r1(nota == null ? ng : (nota + ng) / 2); }
     out[pid] = {
-      team: teamOf[pid], sets, won: sw[pid], counts: c, why, nota,
+      team: teamOf[pid], sets, won: sw[pid], counts: c, why, nota, galera: gal,
       ovrBefore: pre[pid], ovrAfter: ovrOf(after), rawDelta: r1(ovrRaw(after) - ovrRaw(p)),
       atBefore, atAfter, formaBefore: r1(formaBefore), formaAfter
     };
@@ -738,6 +765,7 @@ function balanceTeams(list, T, rnd = Math.random) {
 
 // ---------- Cartas recalculadas a partir do histórico ----------
 const CALIB = [2.0, 1.8, 1.6, 1.4, 1.2];
+const GALERA = { min: 2, step: 6, rate: 0.12, max: 3 };
 const calibOf = n => n < CALIB.length ? CALIB[n] : 1;
 const pad2 = n => String(n).padStart(2, '0');
 function localKey(ms) { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
@@ -780,6 +808,7 @@ function replay(players, games) {
       st.tot.jogos += 1; st.tot.sets += r.sets; st.tot.setsV += r.won;
       for (const k of EVENT_KEYS) if (track.includes(EVENTS[k].attr)) st.tot[k] += (r.counts[k] || 0);
       if (r.nota != null) { st.tot.notaSum = r1(st.tot.notaSum + r.nota); st.tot.notaN += 1; }
+      if (r.galera) { st.tot.galSum = r1(st.tot.galSum + r.galera.avg); st.tot.galN += 1; }
       if (res.mvp === pid) st.tot.mvp += 1;
       if (r.sets > 0) st.n += 1;
       st.hist.push({ g: g.id, d: g.date, ovr: r.ovrAfter, nota: r.nota });
@@ -790,7 +819,7 @@ function replay(players, games) {
   return { cards, results };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { replay, hasResult, validSet, calibOf, CALIB, localKey, ovrRaw, ATTRS, ATTR, POS, EVENTS, EVENT_KEYS, TIERS, starsToAttr, tecnica, ovrOf, tierOf, expectedNet, statDelta, setFormaDelta, computeResult, balanceTeams, costOf, teamSizes, emptyTot, countsFromLog, clamp, r1 };
+if (typeof module !== 'undefined' && module.exports) module.exports = { GALERA, replay, hasResult, validSet, calibOf, CALIB, localKey, ovrRaw, ATTRS, ATTR, POS, EVENTS, EVENT_KEYS, TIERS, starsToAttr, tecnica, ovrOf, tierOf, expectedNet, statDelta, setFormaDelta, computeResult, balanceTeams, costOf, teamSizes, emptyTot, countsFromLog, clamp, r1 };
 
 // ================= App =================
 const $ = (s, r = document) => r.querySelector(s);
@@ -899,6 +928,26 @@ function cleanPlayer(id, d) {
   if (!p.base) p.legacy = { at: cleanAt(d.at), forma: typeof d.forma === 'number' ? clamp(d.forma, 40, 99) : null };
   return p;
 }
+// Jogo semanal: quando o último jogo da série passa (ou é encerrado), qualquer aparelho da turma cria a semana seguinte,
+// no nome de quem marcou a série. O id fixo (série + número) impede duas cópias.
+const RECUR_TRIED = new Set();
+let RATE_T = null;
+function ensureRecurring() {
+  if (!FB() || !S.firmData || !S.db) return;
+  const t = todayStr(), latest = {};
+  for (const g of Object.values(S.games)) if (g.serie) { const l = latest[g.serie]; if (!l || g.seq > l.seq) latest[g.serie] = g; }
+  for (const g of Object.values(latest)) {
+    if (!g.repeat || !g.createdBy || !(g.date < t || g.status === 'encerrado')) continue;
+    let d = addDays(g.date, 7);
+    while (d < t) d = addDays(d, 7);
+    const id = `${g.serie}-${g.seq + 1}`;
+    if (S.games[id] || RECUR_TRIED.has(id)) continue;
+    RECUR_TRIED.add(id);
+    const ng = cleanGame(id, { date: d, time: g.time, place: g.place, max: g.max, note: g.note, vis: g.vis, allowed: g.allowed.slice(), created: Date.now(), createdBy: g.createdBy, track: g.track, nTeams: g.nTeams, serie: g.serie, seq: g.seq + 1, prev: g.id, repeat: true });
+    const data = clone(ng); delete data.conf; delete data.confirms; delete data.votes; delete data.rates;
+    S.db.doc('games/' + id).set(data).catch(() => { });
+  }
+}
 function cleanGame(id, d) {
   d = d || {};
   const ids = a => Array.isArray(a) ? a.filter(x => typeof x === 'string').slice(0, 80) : [];
@@ -924,7 +973,12 @@ function cleanGame(id, d) {
     allowed: ids(d.allowed),
     resultRev: Math.max(0, Math.round(numOr(d.resultRev, 0))),
     confirms: (() => { const o = {}; if (d.confirms && typeof d.confirms === 'object') for (const [k, v] of Object.entries(d.confirms)) if (typeof v === 'number') o[k] = v; return o; })(),
-    votes: (() => { const o = {}; if (d.votes && typeof d.votes === 'object') for (const [k, v] of Object.entries(d.votes)) if (typeof v === 'string' && v !== k) o[k] = v; return o; })()
+    votes: (() => { const o = {}; if (d.votes && typeof d.votes === 'object') for (const [k, v] of Object.entries(d.votes)) if (typeof v === 'string' && v !== k) o[k] = v; return o; })(),
+    rates: (() => { const o = {}; if (d.rates && typeof d.rates === 'object') for (const [k, m] of Object.entries(d.rates)) { if (!m || typeof m !== 'object') continue; const x = {}; for (const [p, v] of Object.entries(m)) { const n = Number(v); if (p !== k && Number.isInteger(n) && n >= 1 && n <= 5) x[p] = n; } o[k] = x; } return o; })(),
+    serie: typeof d.serie === 'string' ? d.serie.slice(0, 80) : '',
+    seq: Math.max(0, Math.round(numOr(d.seq, 0))),
+    prev: typeof d.prev === 'string' ? d.prev.slice(0, 120) : '',
+    repeat: d.repeat === true
   };
   const idxMap = o => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && v >= 0 && v <= 60) r[k] = Math.round(v); return r; };
   g.join = idxMap(d.join); g.leave = idxMap(d.leave);
@@ -1146,7 +1200,7 @@ function subscribe() {
         if (FB() && !S.players[meId()]) setTimeout(() => { if (FB() && !S.players[meId()] && !S.ui.sheet) ACT.newSelf(); }, 60);
       }
       if (got.players && got.games && S.mode === 'cloud') upgradeData();
-      if (firm.players && firm.games) { S.firmData = true; checkMigration(); runPrivacyMigration(); syncPublicProfile(); }
+      if (firm.players && firm.games) { S.firmData = true; checkMigration(); runPrivacyMigration(); syncPublicProfile(); ensureRecurring(); }
       syncSocial();
       if (S.mode === 'cloud') render();
     }, err => {
@@ -1561,7 +1615,7 @@ function agendaView() {
 function heroHTML(g) {
   const d = parseDate(g.date), t = todayStr();
   const conf = g.conf.filter(P);
-  const label = (g.date === t ? 'Hoje' : g.date === addDays(t, 1) ? 'Amanhã' : 'Próximo jogo') + (visLabel(g) === 'Privada' ? ', partida privada' : visLabel(g) === 'Só amigos' ? ', só amigos' : '');
+  const label = (g.date === t ? 'Hoje' : g.date === addDays(t, 1) ? 'Amanhã' : 'Próximo jogo') + (g.repeat ? ', toda semana' : '') + (visLabel(g) === 'Privada' ? ', partida privada' : visLabel(g) === 'Só amigos' ? ', só amigos' : '');
   const inList = g.max ? Math.min(conf.length, g.max) : conf.length, waiting = conf.length - inList;
   const confTxt = conf.length ? `${inList}${g.max ? ' de ' + g.max : ''} confirmados${waiting ? `, ${waiting} na espera` : ''}` : 'Ninguém confirmou ainda';
   const myPos = conf.indexOf(meId());
@@ -1864,7 +1918,7 @@ function placarStep(g) {
   if (W) h += `<div style="margin-top:10px"><button class="btn btn-block" data-act="addSet">${ICON.plus}Adicionar set</button></div>`;
   h += `<div class="total" id="setTotal">${esc(scoreline(g) || '')}</div>`;
   if (W) h += `<div style="margin-top:8px"><button class="btn btn-block btn-ball" data-act="preview">Ver relatório e encerrar</button></div>`;
-  h += votingHTML(g);
+  h += votingHTML(g) + rateHTML(g);
   h += whoPlayedHTML(g);
   return h;
 }
@@ -1881,6 +1935,7 @@ function whyLines(r) {
   }
   const fd = r.formaAfter - r.formaBefore;
   out.push(`Forma ${fd >= 0 ? '+' : '−'}${fmtN(Math.abs(fd))}: ganhou ${r.won} de ${plural(r.sets, 'set', 'sets')}.`);
+  if (r.galera) out.push(`Nota da galera ${fmtN(r.galera.avg)} de 5, com ${r.galera.n} notas: ${r.galera.d >= 0 ? '+' : '−'}${fmtN(Math.abs(r.galera.d))} em cada fundamento.`);
   return out;
 }
 function reportBody(rows, mvp, awards, ctx) {
@@ -1899,11 +1954,22 @@ function reportBody(rows, mvp, awards, ctx) {
     return `<button class="rep" data-act="repToggle" data-pid="${esc(id)}" data-ctx="${ctx}" aria-expanded="${open}">
       <span class="team-dot" style="background:${(TEAMS[r.team] || TEAMS[0]).c}"></span>
       <span class="nota ${id === mvp ? 'hi' : ''}">${r.nota == null ? '–' : fmtN(r.nota)}</span>
-      <span class="item-main"><span class="item-title" style="display:block">${esc(nameOf(id))}</span><span class="item-sub">${r.ovrBefore} → ${r.ovrAfter}</span></span>
+      <span class="item-main"><span class="item-title" style="display:block">${esc(nameOf(id))}</span><span class="item-sub">${r.ovrBefore} → ${r.ovrAfter}${r.galera ? `, galera ${fmtN(r.galera.avg)}` : ''}</span></span>
       <span class="delta ${d > 0 ? 'up' : d < 0 ? 'down' : 'eq'}">${d > 0 ? '+' + d : d < 0 ? '−' + Math.abs(d) : '='}</span>
     </button>${open ? `<div class="rep-detail">${r.sets ? whyLines(r).map(l => `<div>${esc(l)}</div>`).join('') : '<div>Não jogou nenhum set registrado.</div>'}</div>` : ''}`;
-  })), `<p class="sub small" style="margin:-4px 0 10px">Nota de 0 a 10 pelo que foi anotado e pelos sets vencidos. Toque num jogador para ver por que a carta mudou.</p>`);
+  })), `<p class="sub small" style="margin:-4px 0 10px">Nota de 0 a 10 pelo que foi anotado, pelos sets vencidos e pela nota da galera. Toque num jogador para ver por que a carta mudou.</p>`);
   return h;
+}
+function rateOpen(g) { return FBM() && hasResult(g) && voters(g).includes(meId()) && todayStr() <= voteCloseDate(g); }
+function rateHTML(g) {
+  if (!FBM() || !hasResult(g) || !voters(g).includes(meId())) return '';
+  const others = teamIds(g).filter(id => id !== meId() && P(id)).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'pt-BR'));
+  if (!others.length) return '';
+  const mine = (g.rates || {})[meId()] || {}, done = others.filter(id => mine[id]).length;
+  if (!rateOpen(g)) return done ? section('Nota da galera', `<p class="sub">Você deu nota para ${done} de ${others.length}. A avaliação já fechou.</p>`) : '';
+  const row = id => { const p = P(id), v = mine[id] || 0, nm = p.nick || p.name;
+    return `<div class="pres rate-row">${avatar(p)}<div class="item-main"><div class="item-title">${esc(nm)}</div></div><div class="stars" role="group" aria-label="Nota para ${esc(nm)}">${[1, 2, 3, 4, 5].map(n => `<button class="star" data-act="rateP" data-gid="${esc(g.id)}" data-pid="${esc(id)}" data-v="${n}" aria-pressed="${v === n}" aria-label="${n} de 5 para ${esc(nm)}">${n}</button>`).join('')}</div></div>`; };
+  return `<div id="notagalera">${section('Nota da galera', `<p class="sub" style="margin:-4px 0 10px">Como cada um jogou? 1 é mal, 3 é normal, 5 é muito bem. Com duas notas ou mais, a média mexe um pouco na carta. A tela não mostra quem deu qual nota. Você já deu ${done} de ${others.length}.</p>` + listBox(others.map(row)))}</div>`;
 }
 function votingHTML(g) {
   if (!FBM() || !hasResult(g) || voters(g).length < 2) return '';
@@ -1938,7 +2004,7 @@ function finalView(g) {
   h += `<div class="board" style="padding:16px"><div class="board-label">Resultado</div><div class="board-day" style="font-size:30px;margin-top:4px">${esc(scoreline(g) || 'Sem placar')}</div>
     <div class="board-place" style="margin:6px 0 0">${g.sets.filter(s => s.pa != null && s.pb != null).map(s => `${s.pa}–${s.pb}`).join(', ')}</div></div>`;
   if (pend) h += `<p class="sub small" style="margin-top:12px">Prévia: é assim que as cartas vão ficar quando o placar valer.</p>`;
-  h += votingHTML(g);
+  h += votingHTML(g) + rateHTML(g);
   h += whoPlayedHTML(g);
   h += reportBody(rows, res.mvp, res.awards, 'final');
   if (g.teams) h += section('Times', `<div class="teams">${g.teams.map((t, i) => `<div class="team"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span></div>${t.map(id => `<div class="tp"><span class="tp-name">${esc(nameOf(id))}</span><span class="tp-ovr">${rows[id] ? rows[id].ovrAfter : ''}</span></div>`).join('')}</div>`).join('')}</div>`, `<p class="sub small" style="margin:-4px 0 10px">Geral de cada um logo depois deste jogo.</p>`);
@@ -2044,6 +2110,7 @@ function gameFormHTML(id) {
   <label class="field"><span>Observação</span><textarea class="input" id="fNote" maxlength="300" placeholder="Ex.: levar bola, valor da quadra">${esc(d.note)}</textarea></label>
   ${FB() && !g ? whereField() : ''}
   ${FB() ? visField(g) : ''}
+  ${FB() ? repeatField(g, last) : ''}
   <div id="fErr" class="err" role="alert"></div>
   <div style="display:grid;gap:10px;margin-top:8px"><button class="btn btn-block btn-ball" data-act="saveGame" data-id="${esc(id || '')}">${g ? 'Salvar jogo' : 'Marcar jogo'}</button>
   ${g ? `<button class="btn btn-block btn-danger" data-act="askDeleteGame" data-id="${esc(id)}">Apagar jogo</button>` : ''}</div>`;
@@ -2059,8 +2126,9 @@ async function createElsewhere(el, where) {
   try {
     if (where.length === 1) {
       // Uma turma só, mas não a que está aberta: o jogo vai para lá e mexe nas cartas de lá.
-      const t = where[0], g = cleanGame(uid('g'), { date, time, max, place, note, vis, allowed: vis === 'privada' ? [meId()] : [], created: Date.now(), createdBy: meId(), track: ['saq', 'rec'], nTeams: 2 });
-      const data = clone(g); delete data.conf; delete data.confirms; delete data.votes;
+      const rep = !!document.querySelector('[data-act="gRepeat"][aria-pressed="true"]'), gid = uid('g');
+      const t = where[0], g = cleanGame(gid, { date, time, max, place, note, vis, allowed: vis === 'privada' ? [meId()] : [], created: Date.now(), createdBy: meId(), track: ['saq', 'rec'], nTeams: 2, repeat: rep, serie: rep ? gid : '', seq: rep ? 1 : 0 });
+      const data = clone(g); delete data.conf; delete data.confirms; delete data.votes; delete data.rates;
       await window.MCloud.db(t).doc('games/' + g.id).set(data);
       closeSheet(); toast(`Jogo marcado na turma ${(S.myTurmas || []).find(x => x.id === t)?.name || ''}.`);
       return;
@@ -2079,6 +2147,11 @@ async function createElsewhere(el, where) {
     closeSheet(); S.ui.partidaId = id; S.ui.gameId = null; render(); window.scrollTo(0, 0);
     toast(vis === 'privada' ? 'Amistoso marcado. Agora toque em Convidar e escolha quem vai.' : 'Amistoso marcado.');
   } catch (e) { el.disabled = false; $('#fErr').textContent = 'Não consegui marcar agora. Confira a internet e tente de novo.'; }
+}
+function repeatField(g, last) {
+  const on = g ? g.repeat : !!(last && last.repeat);
+  return `<div class="field"><span>Repetição</span><div class="row-wrap"><button class="chip" data-act="gRepeat" aria-pressed="${on}">Repetir toda semana</button></div>
+    <p class="sub small" style="margin-top:8px">O jogo da semana seguinte aparece sozinho, no mesmo dia e horário, depois que este passar. Para pular uma semana, é só mudar a data.</p></div>`;
 }
 function whereField() {
   const list = (S.myTurmas && S.myTurmas.length ? S.myTurmas : [{ id: S.turmaId, name: (S.turma && S.turma.name) || 'Turma' }]);
@@ -3303,6 +3376,16 @@ const ACT = {
   step: el => { S.ui.step = el.dataset.step; S.ui.swapSel = null; render(); window.scrollTo(0, 0); },
   newGame: () => openSheet({ type: 'gameForm' }),
   editGame: () => { const g = curGame(); if (g && canEditGame(g)) openSheet({ type: 'gameForm', id: g.id }); },
+  rateP: el => {
+    const g = S.games[el.dataset.gid], pid = el.dataset.pid, v = Number(el.dataset.v);
+    if (!g || !rateOpen(g) || pid === meId() || !(v >= 1 && v <= 5)) return;
+    const mine = Object.assign({}, (g.rates || {})[meId()] || {});
+    if (mine[pid] === v) delete mine[pid]; else mine[pid] = v;
+    g.rates = Object.assign({}, g.rates || {}, { [meId()]: mine });
+    dirty(); render();
+    clearTimeout(RATE_T); RATE_T = setTimeout(() => { const cur = (S.games[g.id] && S.games[g.id].rates || {})[meId()] || {}; S.db.rate(g.id, meId(), cur).catch(() => toast('Não consegui salvar a nota. Tente de novo.')); }, 600);
+  },
+  gRepeat: el => el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')),
   gWhere: el => { el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')); syncWhere(); },
   saveGame: el => {
     const date = $('#fDate').value, time = $('#fTime').value || '20:00';
@@ -3316,15 +3399,18 @@ const ACT = {
     const visBtn = document.querySelector('[data-act="gVis"][aria-pressed="true"]');
     const vis = FB() && visBtn ? visBtn.dataset.v : 'turma';
     const allowed = vis === 'privada' && meId() ? [meId()] : [];
+    const rep = FB() && !!document.querySelector('[data-act="gRepeat"][aria-pressed="true"]');
     if (id && S.games[id]) {
       if (!canEditGame(S.games[id])) return closeSheet();
       const g0 = S.games[id];
       Object.assign(g0, { date, time, max, place, note }, FB() ? { vis, allowed: vis === 'privada' ? [...new Set(g0.allowed.concat(g0.createdBy ? [g0.createdBy] : []))] : g0.allowed } : {});
+      if (FB()) { g0.repeat = rep; if (rep && !g0.serie) { g0.serie = g0.id; g0.seq = 1; } }
       persist('games', id); closeSheet(); render(); toast('Jogo salvo.');
     } else {
       const last = Object.values(S.games).sort(byDate).pop();
       if (!canCreate()) return closeSheet();
-      const g = cleanGame(uid('g'), { date, time, max, place, note, vis, allowed, created: Date.now(), createdBy: meId(), track: last ? last.track : ['saq', 'rec'], nTeams: last ? last.nTeams : 2 });
+      const gid = uid('g');
+      const g = cleanGame(gid, { date, time, max, place, note, vis, allowed, created: Date.now(), createdBy: meId(), track: last ? last.track : ['saq', 'rec'], nTeams: last ? last.nTeams : 2, repeat: rep, serie: rep ? gid : '', seq: rep ? 1 : 0 });
       S.games[g.id] = g; persist('games', g.id);
       closeSheet(); S.ui.gameId = g.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0); toast('Jogo marcado.');
     }
@@ -3381,7 +3467,14 @@ const ACT = {
     Object.assign(p, { date, time, max: clamp(parseInt($('#fMax').value, 10) || 0, 0, 60), place: $('#fPlace').value.trim().slice(0, 80), note: $('#fNote').value.trim().slice(0, 300) });
     savePartida(p); closeSheet(); render(); toast('Partida salva.');
   },
-  askDeleteGame: el => canEditGame(S.games[el.dataset.id]) && openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda e, se tinha placar, as cartas voltam a ficar como se ele não tivesse acontecido.', ok: 'Apagar jogo', danger: true, run: () => { delete S.games[el.dataset.id]; persist('games', el.dataset.id); S.ui.gameId = null; closeSheet(); render(); toast('Jogo apagado.'); } }),
+  askDeleteGame: el => {
+    const g = S.games[el.dataset.id]; if (!canEditGame(g)) return;
+    const ser = g.serie && g.repeat;
+    openSheet({ type: 'confirm', title: 'Apagar jogo?', text: 'O jogo sai da agenda e, se tinha placar, as cartas voltam a ficar como se ele não tivesse acontecido.' + (ser ? ' Este jogo se repete toda semana: apagar também para a repetição. Para pular só uma semana, mude a data.' : ''), ok: 'Apagar jogo', danger: true, run: () => {
+      if (ser) for (const x of Object.values(S.games)) if (x.serie === g.serie && x.id !== g.id && x.repeat) { x.repeat = false; persist('games', x.id); }
+      delete S.games[g.id]; persist('games', g.id); S.ui.gameId = null; closeSheet(); render(); toast(ser ? 'Jogo apagado. A repetição semanal parou.' : 'Jogo apagado.');
+    } });
+  },
   confirmOk: () => { const s = S.ui.sheet; if (s && s.run) s.run(); },
   togglePres: el => {
     const g = curGame(), id = el.dataset.pid;
@@ -3919,7 +4012,7 @@ window.MCloud = {
           // Partida: a presença (conf) nunca é sobrescrita aqui, só muda por presence/setConf.
           set: data => {
             if (kind !== 'games') return guard(setDoc(ref, data));
-            const d = { ...data }; delete d.conf; delete d.confirms; delete d.votes;
+            const d = { ...data }; delete d.conf; delete d.confirms; delete d.votes; delete d.rates;
             return guard(setDoc(ref, d, { mergeFields: Object.keys(d) }));
           },
           delete: () => guard(deleteDoc(ref))
@@ -3931,6 +4024,8 @@ window.MCloud = {
       confirm: (gid, uid, rev) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { [`confirms.${uid}`]: rev })),
       // Voto no MVP da galera: cada um grava só o próprio voto.
       vote: (gid, uid, pid) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { [`votes.${uid}`]: pid })),
+      // Nota da galera: cada um grava só as próprias notas.
+      rate: (gid, uid, map) => guard(updateDoc(doc(fs, 'turmas', t, 'games', gid), { [`rates.${uid}`]: map })),
       // Trava das notas iniciais depois do primeiro jogo que vale.
       lockCard: pid => guard(updateDoc(doc(fs, 'turmas', t, 'players', pid), { locked: true })),
       // Foto grande fica separada da carta e só é baixada quando alguém abre a foto.

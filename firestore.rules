@@ -152,15 +152,33 @@ service cloud.firestore {
 
       match /games/{g} {
         allow read: if isMember(t);
-        allow create: if isMember(t) && request.resource.data.createdBy == me() && request.resource.data.get('confirms', {}).size() == 0 && request.resource.data.get('votes', {}).size() == 0;
+        allow create: if isMember(t) && request.resource.data.get('confirms', {}).size() == 0 && request.resource.data.get('votes', {}).size() == 0
+          && request.resource.data.get('rates', {}).size() == 0 && (
+          request.resource.data.createdBy == me()
+          // Jogo semanal: qualquer membro cria a próxima semana, no nome de quem marcou a série.
+          || (request.resource.data.get('prev', '') != ''
+              && exists(/databases/$(database)/documents/turmas/$(t)/games/$(request.resource.data.prev))
+              && gameDoc(t, request.resource.data.prev).data.get('repeat', false) == true
+              && gameDoc(t, request.resource.data.prev).data.createdBy == request.resource.data.createdBy
+              && gameDoc(t, request.resource.data.prev).data.get('serie', '') == request.resource.data.get('serie', '')
+              && gameDoc(t, request.resource.data.prev).data.get('vis', 'turma') == request.resource.data.get('vis', 'turma')
+              && gameDoc(t, request.resource.data.prev).data.get('allowed', []) == request.resource.data.get('allowed', [])
+              && request.resource.data.get('seq', 0) == gameDoc(t, request.resource.data.prev).data.get('seq', 0) + 1
+              && g == request.resource.data.serie + '-' + string(request.resource.data.seq)
+              && request.resource.data.get('conf', []).size() == 0
+              && request.resource.data.get('sets', []).size() == 0));
         allow update: if isMember(t) && same('createdBy') && (
-          ((resource.data.createdBy == me() || isAdmin(t)) && same('confirms') && same('votes')
+          ((resource.data.createdBy == me() || isAdmin(t)) && same('confirms') && same('votes') && same('rates')
             && (resultSame() || request.resource.data.get('resultRev', 0) > resource.data.get('resultRev', 0)))
           || (changed().hasOnly(['conf']) && canJoin(resource.data)
               && request.resource.data.get('conf', []).removeAll([me()]) == resource.data.get('conf', []).removeAll([me()]))
           || (changed().hasOnly(['votes']) && inTeams(resource.data)
               && request.resource.data.get('votes', {}).diff(resource.data.get('votes', {})).affectedKeys().hasOnly([me()])
               && (!(me() in request.resource.data.get('votes', {})) || (request.resource.data.votes[me()] is string && request.resource.data.votes[me()] != me())))
+          || (changed().hasOnly(['rates']) && inTeams(resource.data)
+              && request.resource.data.get('rates', {}).diff(resource.data.get('rates', {})).affectedKeys().hasOnly([me()])
+              && (!(me() in request.resource.data.get('rates', {}))
+                  || (request.resource.data.rates[me()] is map && request.resource.data.rates[me()].size() <= 40 && !(me() in request.resource.data.rates[me()]))))
           || (changed().hasOnly(['confirms'])
               && request.resource.data.get('confirms', {}).diff(resource.data.get('confirms', {})).affectedKeys().hasOnly([me()])
               && (!(me() in request.resource.data.get('confirms', {})) || request.resource.data.confirms[me()] == resource.data.get('resultRev', 0))));
