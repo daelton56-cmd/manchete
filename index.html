@@ -1020,7 +1020,7 @@ function cleanGame(id, d) {
     status: d.status === 'encerrado' || d.status === 'finalizado' ? 'encerrado' : 'agendado',
     conf: ids(d.conf), paid: ids(d.paid),
     nTeams: clamp(Math.round(numOr(d.nTeams, 2)), 2, 4),
-    teams: Array.isArray(d.teams) && d.teams.length ? d.teams.slice(0, 4).map(ids) : null,
+    teams: Array.isArray(d.teams) && d.teams.length ? d.teams.slice(0, 4).map(t => ids(Array.isArray(t) ? t : (t && t.p))) : null,
     track: Array.isArray(d.track) ? d.track.filter(a => ATTRS.includes(a)) : ['saq', 'rec'],
     sets: Array.isArray(d.sets) ? d.sets.slice(0, 40).map(s => ({
       a: clamp(Math.round(numOr(s && s.a, 0)), 0, 3), b: clamp(Math.round(numOr(s && s.b, 1)), 0, 3),
@@ -1160,6 +1160,9 @@ function persist(kind, id, delay = 0, then) {
 // Gravação: só os campos que mudaram em relação ao que está no servidor. Se times ou placar mudaram,
 // a versão do placar sobe acima da do servidor, mesmo que outra pessoa tenha mexido antes.
 const SRV = { players: {}, games: {} }, SRV_REV = {}, SAVE = { at: {}, err: {} };
+// O Firebase não aceita lista dentro de lista: os times vão como [{ p: [...] }, ...] e voltam como listas.
+const teamsOut = t => (Array.isArray(t) ? t.map(x => ({ p: (Array.isArray(x) ? x : []).slice() })) : (t == null ? null : t));
+function forStore(kind, x) { if (x && kind === 'games' && 'teams' in x) x.teams = teamsOut(x.teams); return x; }
 const RESULT_KEYS = ['sets', 'teams', 'join', 'leave', 'track', 'log'];
 async function flush(key) {
   const st = PEND[key];
@@ -1179,8 +1182,8 @@ async function flush(key) {
         data.resultRev = rev; obj.resultRev = rev; if (!keys.includes('resultRev')) keys.push('resultRev');
       }
       const part = {}; for (const k of keys) part[k] = data[k];
-      if (keys.length) await ref.set(part, true);
-    } else if (data) await ref.set(data); else await ref.delete();
+      if (keys.length) await ref.set(forStore(kind, part), true);
+    } else if (data) await ref.set(forStore(kind, data)); else await ref.delete();
     if (data && (kind === 'games' || kind === 'players')) { SRV[kind][id] = clone(obj); if (kind === 'games') SRV_REV[id] = numOr(obj.resultRev, 0); }
     SAVE.at[key] = Date.now(); delete SAVE.err[key]; st.retried = false;
     if (kind === 'games' && S.ui.gameId === id) { setTimeout(render, 0); setTimeout(() => { if (S.ui.gameId === id) render(); }, 4200); }
@@ -1286,7 +1289,7 @@ function subscribe() {
         if (FB() && !S.players[meId()]) setTimeout(() => { if (FB() && !S.players[meId()] && !S.ui.sheet) ACT.newSelf(); }, 60);
       }
       if (got.players && got.games && S.mode === 'cloud') upgradeData();
-      if (firm.players && firm.games) { S.firmData = true; checkMigration(); runPrivacyMigration(); syncPublicProfile(); ensureRecurring(); setTimeout(ensureNotas, 0); }
+      if (firm.players && firm.games) { S.firmData = true; checkMigration(); runPrivacyMigration(); syncPublicProfile(); ensureRecurring(); setTimeout(ensureNotas, 0); setTimeout(acertoQuarta, 1200); }
       syncSocial();
       if (S.mode === 'cloud') render();
     }, err => {
@@ -2163,6 +2166,8 @@ function renderSheet() {
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
+  else if (s.type === 'acertoOk') { const g = S.games[s.gid]; if (!g || !g.teams) return closeSheet(); title = 'Jogo de quarta acertado'; body = acertoOkHTML(g); }
+  else if (s.type === 'acerto') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Acertar o jogo de quarta'; body = acertoEscolhaHTML(g, s.azul || [meId()]); }
   else if (s.type === 'notasPrompt') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Jogo encerrado!'; body = `<div style="text-align:center;display:grid;gap:12px"><div class="nt-ball">${CHECK_SVG}</div><div style="font-weight:700;font-size:19px">Vamos dar nota pra galera?</div><p class="sub" style="margin:0">${plural(rateesFor(g, meId()).length, 'pessoa jogou', 'pessoas jogaram')} com você. Leva menos de um minuto, e ninguém vê quem deu qual nota.</p><button class="btn btn-block btn-ball" data-act="notasAbrir" data-gid="${esc(g.id)}">Dar as notas</button><button class="btn btn-block" data-act="closeSheet">Agora não</button><p class="sub small" style="margin:0">A votação fica aberta até ${esc(fmtFecha(notasFecha(g)))}.</p></div>`; }
   else if (s.type === 'notas') { const g = S.games[s.gid]; if (!g || notasEstado(g) !== 'aberta') return closeSheet(); title = 'Notas da galera'; body = notasSheetHTML(g, s.i || 0); }
   else if (s.type === 'abrir') { const g = S.games[s.gid]; if (!g || !canEditGame(g)) return closeSheet(); title = g.aberto ? 'Vagas abertas' : 'Abrir vagas'; body = abrirHTML(g); setTimeout(abPrevUpdate, 0); }
@@ -3079,7 +3084,7 @@ function saveProfile(id) {
 function cleanPartida(id, d) {
   d = d || {};
   const ids = v => (Array.isArray(v) ? v.filter(x => typeof x === 'string' && x.length < 80).slice(0, 500) : []);
-  const roster = {}; if (d.roster && typeof d.roster === 'object') for (const [k, v] of Object.entries(d.roster)) roster[k] = basicFrom(v);
+  const roster = {}; if (d.roster && typeof d.roster === 'object') for (const [k, v] of Object.entries(d.roster)) { roster[k] = basicFrom(v); if (v && typeof v.v === 'string' && v.v !== k) roster[k].v = v.v; }
   const votes = {}; if (d.votes && typeof d.votes === 'object') for (const [k, v] of Object.entries(d.votes)) if (typeof v === 'string' && v !== k) votes[k] = v;
   const names = {}; if (d.turmaNames && typeof d.turmaNames === 'object') for (const [k, v] of Object.entries(d.turmaNames)) names[k] = String(v || '').slice(0, 40);
   return {
@@ -3089,7 +3094,7 @@ function cleanPartida(id, d) {
     date: /^\d{4}-\d{2}-\d{2}$/.test(d.date || '') ? d.date : todayStr(), time: /^\d{2}:\d{2}$/.test(d.time || '') ? d.time : '20:00',
     place: String(d.place || '').slice(0, 80), note: String(d.note || '').slice(0, 300), max: clamp(Math.round(Number(d.max) || 0), 0, 60),
     status: d.status === 'encerrado' ? 'encerrado' : 'agendado', conf: ids(d.conf),
-    teams: Array.isArray(d.teams) && d.teams.length === 2 ? d.teams.map(ids) : null,
+    teams: Array.isArray(d.teams) && d.teams.length === 2 ? d.teams.map(t => ids(Array.isArray(t) ? t : (t && t.p))) : null,
     sets: Array.isArray(d.sets) ? d.sets.slice(0, 9).map(x => ({ pa: Number.isFinite(x && x.pa) ? x.pa : null, pb: Number.isFinite(x && x.pb) ? x.pb : null })) : [],
     votes, roster, created: Number(d.created) || 0
   };
@@ -3114,11 +3119,12 @@ const myPartida = p => p.createdBy === meId();
 const pSetsWon = p => { let a = 0, b = 0; for (const x of p.sets) { if (x.pa == null || x.pb == null || x.pa === x.pb) continue; if (x.pa > x.pb) a++; else b++; } return [a, b]; };
 const pHasResult = p => p.teams && p.sets.some(x => x.pa != null && x.pb != null && x.pa !== x.pb);
 const pVoters = p => (p.teams ? p.teams.flat() : []);
-const pVoteOpen = p => pHasResult(p) && pVoters(p).length >= 2 && todayStr() <= addDays(p.date, 2) && Object.keys(p.votes).filter(u => pVoters(p).includes(u)).length < pVoters(p).length;
-function pTally(p) { const c = {}, vs = pVoters(p); for (const [u, x] of Object.entries(p.votes)) if (vs.includes(u) && vs.includes(x) && x !== u) c[x] = (c[x] || 0) + 1; return c; }
+const pVoteOf = (p, u) => (p.roster[u] && p.roster[u].v) || p.votes[u] || null;
+const pVoteOpen = p => pHasResult(p) && pVoters(p).length >= 2 && todayStr() <= addDays(p.date, 2) && pVoters(p).filter(u => pVoteOf(p, u)).length < pVoters(p).length;
+function pTally(p) { const c = {}, vs = pVoters(p); for (const u of vs) { const x = pVoteOf(p, u); if (x && vs.includes(x) && x !== u) c[x] = (c[x] || 0) + 1; } return c; }
 function partidaRow(p) {
   const d = parseDate(p.date), going = p.conf.includes(meId()), won = pSetsWon(p);
-  const pill = pHasResult(p) && pVoteOpen(p) && pVoters(p).includes(meId()) && !p.votes[meId()] ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Vote no MVP</span>'
+  const pill = pHasResult(p) && pVoteOpen(p) && pVoters(p).includes(meId()) && !pVoteOf(p, meId()) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Vote no MVP</span>'
     : going ? '<span class="pill pill-done">Você vai</span>' : `<span class="pill">${plural(p.conf.length, 'confirmado', 'confirmados')}</span>`;
   return `<button class="item" data-act="openPartida" data-id="${esc(p.id)}"><div class="date-block"><span class="num">${d.getDate()}</span><span>${MESES[d.getMonth()]}</span></div><div class="item-main"><div class="item-title">${esc(fmtDay(p.date))}, ${esc(fmtTime(p.time))}</div><div class="item-sub">Amistoso, ${esc(partidaWhere(p))}${p.place ? '. ' + esc(p.place) : ''}${pHasResult(p) ? `<br>Placar: Amarelo ${won[0]} x ${won[1]} Azul` : ''}</div></div>${pill}</button>`;
 }
@@ -3152,9 +3158,9 @@ function partidaView(p) {
     h += section('Placar', sh);
   }
   if (pHasResult(p)) {
-    const vs = pVoters(p), open = pVoteOpen(p), nV = Object.keys(p.votes).filter(u => vs.includes(u)).length;
+    const vs = pVoters(p), open = pVoteOpen(p), nV = vs.filter(u => pVoteOf(p, u)).length;
     let vh = '';
-    if (open && vs.includes(meId())) vh += `<p class="sub" style="margin:-4px 0 10px">${p.votes[meId()] ? `Você votou em <b>${esc(pnName(p, p.votes[meId()]))}</b>.` : 'Quem jogou mais? O resultado aparece quando a votação fechar.'} ${nV} de ${vs.length} já votaram.</p>` + listBox(vs.filter(u => u !== meId()).map(u => `<div class="pres">${avatar(pnInfo(p, u))}<div class="item-main"><div class="item-title">${esc(pnName(p, u))}</div></div><button class="toggle" data-act="partidaVote" data-id="${esc(p.id)}" data-pid="${esc(u)}" aria-pressed="${p.votes[meId()] === u}">${p.votes[meId()] === u ? 'Seu voto' : 'Votar'}</button></div>`));
+    if (open && vs.includes(meId())) vh += `<p class="sub" style="margin:-4px 0 10px">${pVoteOf(p, meId()) ? `Você votou em <b>${esc(pnName(p, pVoteOf(p, meId())))}</b>.` : 'Quem jogou mais? O resultado aparece quando a votação fechar.'} ${nV} de ${vs.length} já votaram.</p>` + listBox(vs.filter(u => u !== meId()).map(u => `<div class="pres">${avatar(pnInfo(p, u))}<div class="item-main"><div class="item-title">${esc(pnName(p, u))}</div></div><button class="toggle" data-act="partidaVote" data-id="${esc(p.id)}" data-pid="${esc(u)}" aria-pressed="${pVoteOf(p, meId()) === u}">${pVoteOf(p, meId()) === u ? 'Seu voto' : 'Votar'}</button></div>`));
     else if (open) vh += `<p class="sub">${nV} de ${vs.length} já votaram.</p>`;
     else { const t = pTally(p), max = Math.max(0, ...Object.values(t)), w = Object.keys(t).filter(k => t[k] === max && max > 0); vh += w.length ? `<p class="game-title" style="font-size:26px">${w.map(u => esc(pnName(p, u))).join(' e ')}</p><p class="sub">${max} de ${nV} votos</p>` : '<p class="sub">Ninguém votou.</p>'; }
     h += section('MVP da galera', vh);
@@ -3189,7 +3195,62 @@ async function refreshAudience() {
     } catch (e) { }
   }
 }
-function savePartida(p) { if (!window.MCloud.partidaSave) return; window.MCloud.partidaSave(p.id, JSON.parse(JSON.stringify(p))).catch(() => toast('Não consegui salvar a partida. Tente de novo.')); }
+function savePartida(p) { if (!window.MCloud.partidaSave) return; const d = JSON.parse(JSON.stringify(p)); d.teams = teamsOut(d.teams); window.MCloud.partidaSave(p.id, d).catch(() => toast('Não consegui salvar a partida. Tente de novo.')); }
+
+// ================= Acerto do jogo de quarta, 7/10 =================
+// Os times desse jogo nunca chegaram ao banco (o formato antigo era recusado pelo Firebase).
+// No celular de quem criou a turma, o app grava uma vez o que o Daelton passou:
+// time azul = Daelton, Bella, Ângelo, Paulo, Andrei e Helena; o amarelo ganhou por 3 a 1.
+const ACERTO = { date: '2026-10-07', azul: ['bella', 'angelo', 'paulo', 'andrei', 'helena'], key: 'manchete:acerto-0710:' };
+const ACERTO_RUN = new Set();
+function acharPorNome(ids, alvo) {
+  const t = normS(alvo);
+  const hits = ids.filter(id => { const p = P(id); if (!p) return false; const nm = normS(p.name || ''), nk = normS(p.nick || ''); return nm.split(/\s+/)[0] === t || nk === t || nk.split(/\s+/)[0] === t; });
+  return hits.length === 1 ? hits[0] : null;
+}
+function acertoJogo() { return Object.values(S.games).find(x => x.date === ACERTO.date && /atlanta/i.test(x.place || '')) || null; }
+function acertoPool(g) { return [...new Set([...confOrder(g).slice(0, g.max || undefined), ...teamIds(g)])].filter(P); }
+function acertoFeito(g, azul) {
+  if (!g.teams || g.teams.length !== 2 || g.status !== 'encerrado') return false;
+  const az = new Set(g.teams[1]); if (az.size !== azul.length || azul.some(id => !az.has(id))) return false;
+  const won = [0, 0]; for (const q of g.sets) if (validSet(g, q)) won[Number(q.pa) > Number(q.pb) ? q.a : q.b] += 1;
+  return won[0] === 3 && won[1] === 1;
+}
+function acertoQuarta() {
+  if (!FBM() || !S.firmData || !S.turma || S.turma.ownerUid !== meId() || window.MANCHETE_NO_ACERTO) return;
+  let feito = false; try { feito = !!localStorage.getItem(ACERTO.key + S.turmaId); } catch (e) { }
+  const g = acertoJogo(); if (!g || feito || ACERTO_RUN.has(g.id) || PEND['games/' + g.id]) return;
+  const pool = acertoPool(g), todos = Object.keys(S.players).filter(id => P(id) && !P(id).guest);
+  const azul = [meId()], falta = [];
+  for (const n of ACERTO.azul) { const id = acharPorNome(pool, n) || acharPorNome(todos, n); if (id && !azul.includes(id)) azul.push(id); else falta.push(n); }
+  ACERTO_RUN.add(g.id);
+  if (!falta.length && acertoFeito(g, azul)) { try { localStorage.setItem(ACERTO.key + S.turmaId, '1'); } catch (e) { } return; }
+  if (falta.length) { if (!S.ui.sheet) openSheet({ type: 'acerto', gid: g.id, azul }); return; }
+  aplicarAcerto(g, azul);
+}
+function aplicarAcerto(g, azul) {
+  const pool = [...new Set([...acertoPool(g), ...azul])];
+  const amarelo = pool.filter(id => !azul.includes(id));
+  for (const id of azul) if (!g.conf.includes(id)) g.conf.push(id);
+  g.teams = [amarelo, azul.slice()]; g.nTeams = 2;
+  g.sets = [{ a: 0, b: 1, pa: 25, pb: 20 }, { a: 0, b: 1, pa: 20, pb: 25 }, { a: 0, b: 1, pa: 25, pb: 20 }, { a: 0, b: 1, pa: 25, pb: 20 }];
+  g.placarRapido = true; g.status = 'encerrado'; if (!g.finishedAt) g.finishedAt = Date.now();
+  bumpRev(g);
+  for (const id of azul) if (S.db.presence) S.db.presence(g.id, id, true).catch(() => { });
+  persist('games', g.id, 0, () => { try { localStorage.setItem(ACERTO.key + S.turmaId, '1'); } catch (e) { } if (!S.ui.sheet) openSheet({ type: 'acertoOk', gid: g.id }); else toast('Jogo de quarta acertado e salvo.'); });
+  render();
+}
+function acertoOkHTML(g) {
+  const nm = ids => ids.filter(P).map(id => esc(nameOf(id))).join(', ');
+  return `<div style="display:grid;gap:12px"><div class="nt-ball" style="margin:0 auto">${CHECK_SVG}</div><p class="sub" style="margin:0;text-align:center">O jogo de quarta, 7 de outubro, está salvo no banco, e as cartas e o ranking já contam com ele.</p>
+    <div class="ab-card" style="gap:6px"><div class="row" style="gap:8px;align-items:center"><span class="team-dot" style="background:${TEAMS[1].c}"></span><b>Time azul</b><span class="spacer"></span><span class="sub small">1 set</span></div><div class="sub small">${nm(g.teams[1])}</div></div>
+    <div class="ab-card" style="gap:6px"><div class="row" style="gap:8px;align-items:center"><span class="team-dot" style="background:${TEAMS[0].c}"></span><b>Time amarelo</b><span class="spacer"></span><span class="sub small">3 sets</span></div><div class="sub small">${nm(g.teams[0])}</div></div>
+    <p class="sub small" style="margin:0;text-align:center">Se alguém estiver no time errado, abra o jogo e toque em "Corrigir times e placar".</p><button class="btn btn-block btn-ball" data-act="closeSheet">Ok</button></div>`;
+}
+function acertoEscolhaHTML(g, azul) {
+  const pool = [...new Set([...acertoPool(g), ...Object.keys(S.players).filter(id => P(id) && !P(id).guest)])].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'pt-BR'));
+  return `<p class="sub" style="margin:-4px 0 10px">Marque quem jogou no seu time, o azul, que perdeu de 3 a 1. Não achei todo mundo pelo nome.</p>` + listBox(pool.map(id => `<div class="pres">${avatar(P(id))}<div class="item-main"><div class="item-title">${esc(nameOf(id))}${id === meId() ? ' (você)' : ''}</div></div><button class="toggle" data-act="acertoToggle" data-pid="${esc(id)}" aria-pressed="${azul.includes(id)}">${azul.includes(id) ? 'Azul' : 'Amarelo'}</button></div>`)) + `<div id="fErr" class="err" role="alert"></div><button class="btn btn-block btn-ball" style="margin-top:12px" data-act="acertoSalvar">Salvar o jogo de quarta</button>`;
+}
 
 // ================= Dia de jogo: times na mão, jogo em andamento e notas da galera (0 a 10) =================
 const startTs = g => new Date(`${g.date}T${g.time || '20:00'}`).getTime();
@@ -4285,6 +4346,8 @@ const ACT = {
     else for (let i = g.sets.length - 1; i >= 0; i--) { const q = g.sets[i]; if (validSet(g, q) && (Number(q.pa) > Number(q.pb) ? q.a : q.b) === t) { g.sets.splice(i, 1); break; } }
     bumpRev(g); persist('games', g.id); render();
   },
+  acertoToggle: el => { const sh = S.ui.sheet; if (!sh || sh.type !== 'acerto') return; const id = el.dataset.pid, az = new Set(sh.azul || []); if (az.has(id)) az.delete(id); else az.add(id); sh.azul = [...az]; renderSheet(); },
+  acertoSalvar: () => { const sh = S.ui.sheet, g = sh && S.games[sh.gid]; if (!g) return; const az = (sh.azul || []).filter(P); if (az.length < 2) { $('#fErr').textContent = 'Marque quem jogou no time azul.'; return; } closeSheet(); aplicarAcerto(g, az); },
   corrigirFinal: () => { const g = curGame(); if (!g || !canEditGame(g)) return; S.ui.editFinal = true; S.ui.step = 'times'; render(); window.scrollTo(0, 0); },
   verResultado: () => { S.ui.editFinal = false; S.ui.step = null; render(); window.scrollTo(0, 0); },
   retrySave: el => { const g = S.games[el.dataset.id]; if (!g) return; delete SAVE.err['games/' + g.id]; persist('games', g.id); render(); },
@@ -4505,8 +4568,8 @@ const ACT = {
   pDelSet: el => { const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p)) return; p.sets.splice(Number(el.dataset.i), 1); savePartida(p); render(); },
   partidaVote: el => {
     const p = S.partidas[el.dataset.id], u = el.dataset.pid; if (!p || !pVoteOpen(p) || !pVoters(p).includes(meId()) || u === meId()) return;
-    p.votes = Object.assign({}, p.votes, { [meId()]: u }); render();
-    window.MCloud.partidaVote(p.id, meId(), u).then(() => toast(`Voto em ${pnName(p, u)} registrado.`)).catch(() => toast('Não consegui registrar o voto.'));
+    p.roster[meId()] = Object.assign({}, p.roster[meId()] || myBasic(), { v: u }); render();
+    window.MCloud.partidaPresence(p.id, meId(), true, p.roster[meId()]).then(() => toast(`Voto em ${pnName(p, u)} registrado.`)).catch(() => toast('Não consegui registrar o voto.'));
   },
   partidaClose: el => { const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p)) return; p.status = 'encerrado'; savePartida(p); render(); toast('Partida encerrada.'); },
   askDelPartida: el => { const p = S.partidas[el.dataset.id]; if (!p || !myPartida(p)) return; openSheet({ type: 'confirm', title: 'Apagar a partida?', text: 'A partida some para todo mundo. Como é amistoso, nenhuma carta muda.', ok: 'Apagar', run: () => { closeSheet(); window.MCloud.partidaDelete(p.id).then(() => { delete S.partidas[p.id]; S.ui.partidaId = null; render(); toast('Partida apagada.'); }).catch(() => toast('Não consegui apagar.')); } }); },
