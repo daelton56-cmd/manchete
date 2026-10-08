@@ -346,6 +346,9 @@ td .num{font-size:18px}
 .nt-tp .tp{flex:1}
 .nt-pool{border-style:dashed}
 .stb{width:42px; height:42px; border-radius:12px; border:1px solid var(--line-strong); background:var(--surface); color:var(--ink); font-size:20px; font-weight:700}
+.save-chip{display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:0 10px; min-height:28px; font-size:12.5px; font-weight:700; background:var(--line); color:var(--muted); border:0; flex:none}
+.save-chip.ok{background:#E2F1E7; color:#1B5A34}
+.save-chip.err{background:#FBE6E2; color:#8F2414}
 .link-btn{padding:0; color:var(--ink); font-weight:700; text-decoration:underline; text-underline-offset:2px; font-size:inherit}
 .turma-switch{display:inline-flex; align-items:center; gap:6px; padding:0; color:var(--ink)}
 .turma-switch svg{width:22px; height:22px; margin-top:2px}
@@ -1154,6 +1157,10 @@ function persist(kind, id, delay = 0, then) {
   clearTimeout(st.timer);
   st.timer = setTimeout(() => flush(key), delay);
 }
+// Gravação: só os campos que mudaram em relação ao que está no servidor. Se times ou placar mudaram,
+// a versão do placar sobe acima da do servidor, mesmo que outra pessoa tenha mexido antes.
+const SRV = { players: {}, games: {} }, SRV_REV = {}, SAVE = { at: {}, err: {} };
+const RESULT_KEYS = ['sets', 'teams', 'join', 'leave', 'track', 'log'];
 async function flush(key) {
   const st = PEND[key];
   if (!st || st.saving || !st.dirty) return;
@@ -1164,14 +1171,31 @@ async function flush(key) {
     const ref = S.db.doc(key);
     const data = obj ? clone(obj) : null;
     if (data && kind === 'players' && privacyOn()) for (const f of PERSONAL) delete data[f];
-    if (data) await ref.set(data); else await ref.delete();
+    const base = data && FBM() && (kind === 'games' || kind === 'players') ? (SRV[kind] || {})[id] : null;
+    if (data && base) {
+      const keys = Object.keys(data).filter(k => !(kind === 'games' && ['conf', 'confirms', 'votes', 'rates'].includes(k)) && JSON.stringify(data[k]) !== JSON.stringify(base[k]));
+      if (kind === 'games' && keys.some(k => RESULT_KEYS.includes(k))) {
+        const rev = Math.max(numOr(data.resultRev, 0), (SRV_REV[id] || 0) + 1);
+        data.resultRev = rev; obj.resultRev = rev; if (!keys.includes('resultRev')) keys.push('resultRev');
+      }
+      const part = {}; for (const k of keys) part[k] = data[k];
+      if (keys.length) await ref.set(part, true);
+    } else if (data) await ref.set(data); else await ref.delete();
+    if (data && (kind === 'games' || kind === 'players')) { SRV[kind][id] = clone(obj); if (kind === 'games') SRV_REV[id] = numOr(obj.resultRev, 0); }
+    SAVE.at[key] = Date.now(); delete SAVE.err[key]; st.retried = false;
+    if (kind === 'games' && S.ui.gameId === id) { setTimeout(render, 0); setTimeout(() => { if (S.ui.gameId === id) render(); }, 4200); }
     st.tries = 0;
     const cbs = st.after || []; st.after = [];
     for (const f of cbs) { try { f(); } catch (er) { } }
   } catch (e) {
     const code = e && e.code;
     if (code === 'unavailable' && st.tries < 2) { st.tries++; st.dirty = true; st.saving = false; st.timer = setTimeout(() => flush(key), 600 + Math.random() * 900); return; }
-    if (FBM() && code === 'permission-denied') { toast('Você não tem permissão para mudar isso.'); delete PEND[key]; resync(); return; }
+    if (FBM() && code === 'permission-denied' && !st.retried) {
+      // Pode ter sido outra pessoa mexendo ao mesmo tempo: espera chegar a versão nova e tenta de novo, só com a diferença.
+      st.retried = true; st.dirty = true; st.saving = false; st.timer = setTimeout(() => flush(key), 900); return;
+    }
+    if (FBM() && code === 'permission-denied') { SAVE.err[key] = true; toast(kind === 'games' ? 'Não consegui salvar este jogo. Recarreguei a versão mais nova: confira e tente de novo.' : 'Você não tem permissão para mudar isso.'); delete PEND[key]; resync(); render(); return; }
+    SAVE.err[key] = true;
     if (code === 'invalid_argument' || code === 'revoked' || code === 'not_granted') { S.canWrite = false; toast('Você pode ver, mas não editar este app.'); render(); }
     else if (code === 'quota_exceeded') toast('O espaço do app encheu. Apague jogos antigos para liberar.');
     else toast('Não consegui salvar agora. Tente de novo em instantes.');
@@ -1233,12 +1257,13 @@ function startLocal() {
   render();
 }
 function applySnapshot(kind, snap) {
-  const map = {};
+  const map = {}, srv = {};
   for (const doc of snap.docs) {
     const data = doc.data();
-    if (data && typeof data === 'object') map[doc.id] = kind === 'players' ? cleanPlayer(doc.id, clone(data)) : cleanGame(doc.id, clone(data));
+    if (data && typeof data === 'object') { map[doc.id] = kind === 'players' ? cleanPlayer(doc.id, clone(data)) : cleanGame(doc.id, clone(data)); srv[doc.id] = clone(map[doc.id]); if (kind === 'games') SRV_REV[doc.id] = Math.max(0, Math.round(numOr(data.resultRev, 0))); }
     if (kind === 'players' && data && typeof data === 'object') { if (PERSONAL.some(f => f in data)) S.rawPersonal.add(doc.id); else S.rawPersonal.delete(doc.id); }
   }
+  SRV[kind] = srv;
   for (const key of Object.keys(PEND)) {
     const [k, id] = key.split('/');
     if (k !== kind) continue;
@@ -1637,7 +1662,7 @@ function viewHTML() {
   if (S.mode === 'signed-out') return authView();
   if (S.mode === 'no-turma') return noTurmaView();
   const g = curGame();
-  if (g) return g.status === 'encerrado' ? finalView(g) : gameView(g);
+  if (g) return g.status === 'encerrado' && !S.ui.editFinal ? finalView(g) : gameView(g);
   if (S.ui.partidaId && S.partidas[S.ui.partidaId]) return partidaView(S.partidas[S.ui.partidaId]);
   if (S.ui.abertoId && S.abertos[S.ui.abertoId]) return abertoView(S.abertos[S.ui.abertoId]);
   if (S.ui.tab === 'elenco') return elencoView();
@@ -1882,9 +1907,17 @@ function confirmBox(g) {
   if (canConfirm(g)) return `<div class="banner" style="border:1px solid var(--ball);background:transparent;flex-wrap:wrap"><span class="spacer">O placar foi ${esc(scoreline(g) || '')}. Confere e confirma?</span><button class="btn btn-sm btn-ball" data-act="confirmScore" data-id="${esc(g.id)}">Confirmar placar</button></div>`;
   return `<div class="banner" style="border:1px solid var(--zone);background:transparent">Os pontos entram nas cartas quando alguém de outro time confirmar o placar.</div>`;
 }
+function saveChip(g) {
+  if (!FBM() || !canEditGame(g)) return '';
+  const key = 'games/' + g.id;
+  if (PEND[key]) return '<span class="save-chip">Salvando…</span>';
+  if (SAVE.err[key]) return `<button class="save-chip err" data-act="retrySave" data-id="${esc(g.id)}">Não salvou. Tentar de novo</button>`;
+  if (SAVE.at[key] && Date.now() - SAVE.at[key] < 4000) return `<span class="save-chip ok">${CHECK_SVG}Salvo</span>`;
+  return '';
+}
 function gameHead(g) {
   return `<div class="game-head">
-    <div class="game-title">${fmtDay(g.date)}, ${fmtTime(g.time)}</div>
+    <div class="row" style="align-items:center;gap:8px"><div class="game-title" style="flex:1">${fmtDay(g.date)}, ${fmtTime(g.time)}</div>${saveChip(g)}</div>
     <div class="sub" style="margin-top:4px">${esc(g.place || 'Local a definir')}${g.note ? '<br>' + esc(g.note) : ''}</div>
   </div>`;
 }
@@ -1894,10 +1927,11 @@ function gameView(g) {
   const conf = g.conf.filter(P).length;
   const st = (k, n, l) => `<button class="step" data-act="step" data-step="${k}" ${step === k ? 'aria-current="step"' : ''}><b>${n}</b>${l}</button>`;
   let h = gameHead(g) + confirmBox(g);
+  if (FBM() && g.status === 'encerrado') h += `<div class="banner" style="background:transparent;border:1px solid var(--line-strong)"><span class="spacer">Corrigindo um jogo encerrado. As cartas e o ranking se ajustam sozinhos.</span><button class="btn btn-sm btn-ball" data-act="verResultado">Ver resultado</button></div>`;
   if (FBM()) h += `<nav class="steps" aria-label="Etapas do jogo">${st('presenca', 1, 'Presença')}${st('times', 2, 'Times')}${st('jogo', 3, 'Jogo')}${st('notas', 4, 'Notas')}</nav>`;
   else h += `<nav class="steps" aria-label="Etapas do jogo">${st('presenca', 1, 'Presença')}${st('times', 2, 'Times')}${st('sumula', 3, 'Súmula')}${st('placar', 4, 'Placar')}</nav>`;
   if (step === 'presenca') h += presencaStep(g, conf);
-  else if (step === 'times') h += FBM() && !g.sets.length ? timesStep2(g) : timesStep(g);
+  else if (step === 'times') h += FBM() ? timesStep2(g) : timesStep(g);
   else if (step === 'jogo') h += jogoStep(g);
   else if (step === 'notas') h += notasHTML(g) || '<p class="sub" style="margin-top:14px">As notas da galera aparecem aqui depois do jogo.</p>';
   else if (step === 'sumula') h += sumulaStep(g);
@@ -2113,7 +2147,7 @@ function finalView(g) {
   h += reportBody(rows, res.mvp, res.awards, 'final');
   if (g.teams) h += section('Times', `<div class="teams">${g.teams.map((t, i) => `<div class="team"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span></div>${t.map(id => `<div class="tp"><span class="tp-name">${esc(nameOf(id))}</span><span class="tp-ovr">${rows[id] ? rows[id].ovrAfter : ''}</span></div>`).join('')}</div>`).join('')}</div>`, `<p class="sub small" style="margin:-4px 0 10px">Geral de cada um logo depois deste jogo.</p>`);
   h += `<div class="row-wrap" style="margin-top:16px"><button class="btn btn-sm" data-act="copyResult">${ICON.copy}Copiar resultado</button></div>`;
-  if (canCreate()) h += `<div style="margin-top:12px;display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="nextWeek">${ICON.plus}Marcar o mesmo jogo na semana que vem</button>${canEditGame(g) ? `<button class="btn btn-block" data-act="reopen">${ICON.undo}Reabrir para corrigir</button>` : ''}</div>`;
+  if (canCreate()) h += `<div style="margin-top:12px;display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="nextWeek">${ICON.plus}Marcar o mesmo jogo na semana que vem</button>${canEditGame(g) ? `${FBM() ? '<button class="btn btn-block" data-act="corrigirFinal">Corrigir times e placar</button>' : ''}<button class="btn btn-block" data-act="reopen">${ICON.undo}Reabrir para corrigir</button>` : ''}</div>`;
   return h;
 }
 
@@ -3305,13 +3339,14 @@ function teamsSave(g, msg) { bumpRev(g); persist('games', g.id); render(); if (m
 function jogoStep(g) {
   const W = canEditGame(g), live = Date.now() >= startTs(g);
   if (!g.teams || g.teams.filter(t => t.length).length < 2) return `<div class="empty" style="margin-top:14px"><h3>Monte os times primeiro</h3><p class="sub">Sorteie, monte na mão ou deixe os capitães escolherem.</p><button class="btn" data-act="step" data-step="times">Ir para os times</button></div>`;
-  let h = `<div class="nt-live"><span class="nt-k">${live ? `Em andamento desde ${esc(fmtTime(g.time))}` : `Começa às ${esc(fmtTime(g.time))}`}</span><div class="nt-name" style="font-size:32px">${g.teams.map((_, i) => TEAMS[i].name).join(' x ')}</div><div class="nt-sub">${g.teams.map(t => t.filter(P).map(id => esc(nameOf(id))).join(', ')).join('<br>')}</div></div>`;
+  let h = `<div class="nt-live"><span class="nt-k">${g.status === 'encerrado' ? 'Jogo encerrado' : live ? `Em andamento desde ${esc(fmtTime(g.time))}` : `Começa às ${esc(fmtTime(g.time))}`}</span><div class="nt-name" style="font-size:32px">${g.teams.map((_, i) => TEAMS[i].name).join(' x ')}</div><div class="nt-sub">${g.teams.map(t => t.filter(P).map(id => esc(nameOf(id))).join(', ')).join('<br>')}</div></div>`;
   if (W && g.teams.length === 2) {
     const won = [0, 0]; for (const s of g.sets) { if (!validSet(g, s)) continue; won[Number(s.pa) > Number(s.pb) ? s.a : s.b] += 1; }
     const st = t => `<div class="row" style="gap:8px;align-items:center"><button class="stb" data-act="quickSet" data-t="${t}" data-d="-1" aria-label="Menos um set do ${TEAMS[t].name.toLowerCase()}" ${won[t] ? '' : 'disabled'}>−</button><span class="pay-big num">${won[t]}</span><button class="stb" data-act="quickSet" data-t="${t}" data-d="1" aria-label="Mais um set do ${TEAMS[t].name.toLowerCase()}">+</button></div>`;
     h += `<div class="ab-card" style="margin-top:12px"><div class="row"><b>Quem ganhou?</b><span class="spacer"></span><span class="sub small">opcional</span></div><div class="row" style="justify-content:space-between;align-items:center">${st(0)}<span class="sub small">sets</span>${st(1)}</div><div class="row sub small"><span class="team-dot" style="background:${TEAMS[0].c}"></span>${TEAMS[0].name}<span class="spacer"></span>${TEAMS[1].name}<span class="team-dot" style="background:${TEAMS[1].c}"></span></div></div>`;
   }
-  if (W) h += `<button class="btn btn-block btn-ball" style="margin-top:12px;min-height:56px;font-size:17px" data-act="encerrarJogo">Encerrar o jogo</button><p class="sub small" style="text-align:center;margin-top:8px">Se ninguém encerrar, a votação abre sozinha às ${new Date(startTs(g) + 3 * 3600e3).getHours()}h.</p>`;
+  if (W && g.status === 'encerrado') h += `<button class="btn btn-block btn-ball" style="margin-top:12px" data-act="verResultado">Ver resultado</button><p class="sub small" style="text-align:center;margin-top:8px">O jogo já está encerrado. O que você mudar aqui fica salvo e as cartas se ajustam.</p>`;
+  else if (W) h += `<button class="btn btn-block btn-ball" style="margin-top:12px;min-height:56px;font-size:17px" data-act="encerrarJogo">Encerrar o jogo</button><p class="sub small" style="text-align:center;margin-top:8px">Se ninguém encerrar, a votação abre sozinha às ${new Date(startTs(g) + 3 * 3600e3).getHours()}h.</p>`;
   else h += '<p class="sub" style="margin-top:12px">Quem marcou encerra o jogo. Depois, todo mundo que jogou dá as notas da galera.</p>';
   h += `<div class="row" style="justify-content:center;gap:18px;margin-top:6px"><button class="link-btn quiet" data-act="step" data-step="placar">Placar por set</button><button class="link-btn quiet" data-act="step" data-step="sumula">Anotar lances (súmula)</button></div>`;
   return h;
@@ -4010,7 +4045,7 @@ function keepFormInputs(fn) {
 // ---------- Ações ----------
 const ACT = {
   tab: el => { S.ui.tab = el.dataset.tab; S.ui.gameId = null; render(); window.scrollTo(0, 0); setTimeout(healViewport, 50); if (S.ui.tab === 'elenco') loadFof(); },
-  home: () => { S.ui.gameId = null; S.ui.partidaId = null; S.ui.abertoId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
+  home: () => { S.ui.editFinal = false; S.ui.gameId = null; S.ui.partidaId = null; S.ui.abertoId = null; S.ui.tab = 'jogos'; render(); window.scrollTo(0, 0); },
   help: () => openSheet({ type: 'help' }),
   closeSheet: () => closeSheet(),
   elencoTab: el => { S.ui.elencoRecent = el.dataset.v === 'recentes'; render(); },
@@ -4212,7 +4247,7 @@ const ACT = {
     render();
   },
   teamAdd: el => {
-    const g = curGame(); if (!g || !canEditGame(g) || g.sets.length) return;
+    const g = curGame(); if (!g || !canEditGame(g)) return;
     const T = g.nTeams || 2;
     if (!g.teams || g.teams.length !== T) g.teams = Array.from({ length: T }, (_, i) => (g.teams && g.teams[i]) || []);
     const id = el.dataset.pid; if (g.teams.some(t => t.includes(id))) return;
@@ -4220,13 +4255,13 @@ const ACT = {
     g.teams[ti].push(id); teamsSave(g);
   },
   teamMove: el => {
-    const g = curGame(); if (!g || !canEditGame(g) || !g.teams || g.sets.length) return;
+    const g = curGame(); if (!g || !canEditGame(g) || !g.teams) return;
     const id = el.dataset.pid, ti = g.teams.findIndex(t => t.includes(id)); if (ti < 0) return;
     const to = (ti + 1) % g.teams.length;
     g.teams[ti] = g.teams[ti].filter(x => x !== id); g.teams[to].push(id);
     teamsSave(g, `${nameOf(id)} foi para o time ${TEAMS[to].name.toLowerCase()}.`);
   },
-  teamOut: el => { const g = curGame(); if (!g || !canEditGame(g) || !g.teams || g.sets.length) return; const id = el.dataset.pid; g.teams = g.teams.map(t => t.filter(x => x !== id)); teamsSave(g); },
+  teamOut: el => { const g = curGame(); if (!g || !canEditGame(g) || !g.teams) return; const id = el.dataset.pid; g.teams = g.teams.map(t => t.filter(x => x !== id)); teamsSave(g); },
   capPick: el => {
     const g = curGame(); if (!g || !canEditGame(g) || g.sets.length) return;
     const id = el.dataset.pid;
@@ -4250,11 +4285,14 @@ const ACT = {
     else for (let i = g.sets.length - 1; i >= 0; i--) { const q = g.sets[i]; if (validSet(g, q) && (Number(q.pa) > Number(q.pb) ? q.a : q.b) === t) { g.sets.splice(i, 1); break; } }
     bumpRev(g); persist('games', g.id); render();
   },
+  corrigirFinal: () => { const g = curGame(); if (!g || !canEditGame(g)) return; S.ui.editFinal = true; S.ui.step = 'times'; render(); window.scrollTo(0, 0); },
+  verResultado: () => { S.ui.editFinal = false; S.ui.step = null; render(); window.scrollTo(0, 0); },
+  retrySave: el => { const g = S.games[el.dataset.id]; if (!g) return; delete SAVE.err['games/' + g.id]; persist('games', g.id); render(); },
   encerrarJogo: () => {
     const g = curGame(); if (!g || !canEditGame(g)) return;
     g.status = 'encerrado'; g.finishedAt = Date.now(); persist('games', g.id);
     S.ui.step = null; render(); window.scrollTo(0, 0);
-    toast('Jogo encerrado. Agora a galera dá as notas.');
+    S.ui.editFinal = false; toast('Jogo encerrado. Agora a galera dá as notas.');
     if (votantes(g).includes(meId())) setTimeout(() => { if (S.ui.sheet) return; S.ui.notasPrompted[g.id] = true; openSheet({ type: 'notasPrompt', gid: g.id }); }, 400);
   },
   homeTab: el => { S.ui.homeTab = el.dataset.v === 'abertas' ? 'abertas' : 'minhas'; render(); window.scrollTo(0, 0); },
@@ -4400,7 +4438,7 @@ const ACT = {
   reload: () => location.reload(),
   sort: el => { S.ui.sort = el.dataset.sort; render(); },
   rankSort: el => { S.ui.rankSort = el.dataset.sort; render(); },
-  openGame: el => { if (!gameVisible(S.games[el.dataset.id])) return toast('Essa partida é privada.'); if (S.ui.sheet) closeSheet(); S.ui.gameId = el.dataset.id; syncSocial(); S.ui.step = null; S.ui.selP = null; S.ui.swapSel = null; S.ui.openRep = null; S.ui.flash = ''; render(); window.scrollTo(0, 0); },
+  openGame: el => { if (!gameVisible(S.games[el.dataset.id])) return toast('Essa partida é privada.'); if (S.ui.sheet) closeSheet(); S.ui.editFinal = false; S.ui.gameId = el.dataset.id; syncSocial(); S.ui.step = null; S.ui.selP = null; S.ui.swapSel = null; S.ui.openRep = null; S.ui.flash = ''; render(); window.scrollTo(0, 0); },
   step: el => { S.ui.step = el.dataset.step; S.ui.swapSel = null; render(); window.scrollTo(0, 0); },
   newGame: () => openSheet({ type: 'gameForm' }),
   editGame: () => { const g = curGame(); if (g && canEditGame(g)) openSheet({ type: 'gameForm', id: g.id }); },
@@ -5065,9 +5103,11 @@ window.MCloud = {
         const ref = doc(fs, 'turmas', t, kind, id);
         return {
           // Partida: a presença (conf) nunca é sobrescrita aqui, só muda por presence/setConf.
-          set: data => {
-            if (kind !== 'games') return guard(setDoc(ref, data));
+          // partial: grava só os campos enviados, sem tocar no resto do documento.
+          set: (data, partial) => {
+            if (kind !== 'games') return guard(partial ? setDoc(ref, data, { mergeFields: Object.keys(data) }) : setDoc(ref, data));
             const d = { ...data }; delete d.conf; delete d.confirms; delete d.votes; delete d.rates;
+            if (!Object.keys(d).length) return Promise.resolve();
             return guard(setDoc(ref, d, { mergeFields: Object.keys(d) }));
           },
           delete: () => guard(deleteDoc(ref))
