@@ -2167,7 +2167,7 @@ function renderSheet() {
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
   else if (s.type === 'acertoOk') { const g = S.games[s.gid]; if (!g || !g.teams) return closeSheet(); title = 'Jogo de quarta acertado'; body = acertoOkHTML(g); }
-  else if (s.type === 'acerto') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Acertar o jogo de quarta'; body = acertoEscolhaHTML(g, s.azul || [meId()]); }
+  else if (s.type === 'acerto') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Acertar o jogo de quarta'; body = acertoEscolhaHTML(g, s); }
   else if (s.type === 'notasPrompt') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Jogo encerrado!'; body = `<div style="text-align:center;display:grid;gap:12px"><div class="nt-ball">${CHECK_SVG}</div><div style="font-weight:700;font-size:19px">Vamos dar nota pra galera?</div><p class="sub" style="margin:0">${plural(rateesFor(g, meId()).length, 'pessoa jogou', 'pessoas jogaram')} com você. Leva menos de um minuto, e ninguém vê quem deu qual nota.</p><button class="btn btn-block btn-ball" data-act="notasAbrir" data-gid="${esc(g.id)}">Dar as notas</button><button class="btn btn-block" data-act="closeSheet">Agora não</button><p class="sub small" style="margin:0">A votação fica aberta até ${esc(fmtFecha(notasFecha(g)))}.</p></div>`; }
   else if (s.type === 'notas') { const g = S.games[s.gid]; if (!g || notasEstado(g) !== 'aberta') return closeSheet(); title = 'Notas da galera'; body = notasSheetHTML(g, s.i || 0); }
   else if (s.type === 'abrir') { const g = S.games[s.gid]; if (!g || !canEditGame(g)) return closeSheet(); title = g.aberto ? 'Vagas abertas' : 'Abrir vagas'; body = abrirHTML(g); setTimeout(abPrevUpdate, 0); }
@@ -3225,18 +3225,19 @@ function acertoQuarta() {
   for (const n of ACERTO.azul) { const id = acharPorNome(pool, n) || acharPorNome(todos, n); if (id && !azul.includes(id)) azul.push(id); else falta.push(n); }
   ACERTO_RUN.add(g.id);
   if (!falta.length && acertoFeito(g, azul)) { try { localStorage.setItem(ACERTO.key + S.turmaId, '1'); } catch (e) { } return; }
-  if (falta.length) { if (!S.ui.sheet) openSheet({ type: 'acerto', gid: g.id, azul }); return; }
+  if (falta.length) { if (!S.ui.sheet) openSheet({ type: 'acerto', gid: g.id, azul: azul.filter(id => pool.includes(id)), extra: {}, falta }); return; }
   aplicarAcerto(g, azul);
 }
-function aplicarAcerto(g, azul) {
-  const pool = [...new Set([...acertoPool(g), ...azul])];
+function aplicarAcerto(g, azul, extraAmarelo = []) {
+  const pool = [...new Set([...acertoPool(g), ...azul, ...extraAmarelo])];
   const amarelo = pool.filter(id => !azul.includes(id));
-  for (const id of azul) if (!g.conf.includes(id)) g.conf.push(id);
+  const novos = [...new Set([...azul, ...extraAmarelo])].filter(id => !g.conf.includes(id));
+  for (const id of novos) g.conf.push(id);
   g.teams = [amarelo, azul.slice()]; g.nTeams = 2;
   g.sets = [{ a: 0, b: 1, pa: 25, pb: 20 }, { a: 0, b: 1, pa: 20, pb: 25 }, { a: 0, b: 1, pa: 25, pb: 20 }, { a: 0, b: 1, pa: 25, pb: 20 }];
   g.placarRapido = true; g.status = 'encerrado'; if (!g.finishedAt) g.finishedAt = Date.now();
   bumpRev(g);
-  for (const id of azul) if (S.db.presence) S.db.presence(g.id, id, true).catch(() => { });
+  for (const id of novos) if (S.db.presence) S.db.presence(g.id, id, true).catch(() => { });
   persist('games', g.id, 0, () => { try { localStorage.setItem(ACERTO.key + S.turmaId, '1'); } catch (e) { } if (!S.ui.sheet) openSheet({ type: 'acertoOk', gid: g.id }); else toast('Jogo de quarta acertado e salvo.'); });
   render();
 }
@@ -3247,9 +3248,23 @@ function acertoOkHTML(g) {
     <div class="ab-card" style="gap:6px"><div class="row" style="gap:8px;align-items:center"><span class="team-dot" style="background:${TEAMS[0].c}"></span><b>Time amarelo</b><span class="spacer"></span><span class="sub small">3 sets</span></div><div class="sub small">${nm(g.teams[0])}</div></div>
     <p class="sub small" style="margin:0;text-align:center">Se alguém estiver no time errado, abra o jogo e toque em "Corrigir times e placar".</p><button class="btn btn-block btn-ball" data-act="closeSheet">Ok</button></div>`;
 }
-function acertoEscolhaHTML(g, azul) {
-  const pool = [...new Set([...acertoPool(g), ...Object.keys(S.players).filter(id => P(id) && !P(id).guest)])].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'pt-BR'));
-  return `<p class="sub" style="margin:-4px 0 10px">Marque quem jogou no seu time, o azul, que perdeu de 3 a 1. Não achei todo mundo pelo nome.</p>` + listBox(pool.map(id => `<div class="pres">${avatar(P(id))}<div class="item-main"><div class="item-title">${esc(nameOf(id))}${id === meId() ? ' (você)' : ''}</div></div><button class="toggle" data-act="acertoToggle" data-pid="${esc(id)}" aria-pressed="${azul.includes(id)}">${azul.includes(id) ? 'Azul' : 'Amarelo'}</button></div>`)) + `<div id="fErr" class="err" role="alert"></div><button class="btn btn-block btn-ball" style="margin-top:12px" data-act="acertoSalvar">Salvar o jogo de quarta</button>`;
+function acertoEscolhaHTML(g, sh) {
+  const az = new Set(sh.azul || []), extra = sh.extra || {};
+  const byName = (a, b) => nameOf(a).localeCompare(nameOf(b), 'pt-BR');
+  const pool = acertoPool(g).sort(byName);
+  const resto = Object.keys(S.players).filter(id => P(id) && !P(id).guest && !pool.includes(id)).sort(byName);
+  const nomes = { bella: 'Bella', angelo: 'Ângelo', paulo: 'Paulo', andrei: 'Andrei', helena: 'Helena' };
+  const nAz = pool.filter(id => az.has(id)).length + Object.values(extra).filter(v => v === 'azul').length;
+  const nAm = pool.filter(id => !az.has(id)).length + Object.values(extra).filter(v => v === 'amarelo').length;
+  const seg = (id, cur, opts) => `<div class="seg" role="group" aria-label="Time de ${esc(nameOf(id))}" style="flex:none">${opts.map(([v, l]) => `<button data-act="acertoSet" data-pid="${esc(id)}" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</div>`;
+  let h = `<p class="sub" style="margin:-4px 0 10px">Seu time, o azul, perdeu de 3 a 1.${(sh.falta || []).length ? ` Não achei pelo nome: <b>${(sh.falta || []).map(n => esc(nomes[n] || n)).join(', ')}</b>. Marque no time certo.` : ''}</p>`;
+  h += `<div class="pay-sec">Confirmaram presença, ${pool.length}</div>` + listBox(pool.map(id => `<div class="pres">${avatar(P(id))}<div class="item-main"><div class="item-title">${esc(nameOf(id))}${id === meId() ? ' (você)' : ''}</div></div>${seg(id, az.has(id) ? 'azul' : 'amarelo', [['azul', 'Azul'], ['amarelo', 'Amarelo']])}</div>`));
+  if (resto.length) {
+    if (!S.ui.acertoMais) h += `<button class="link-btn quiet" style="margin-top:8px" data-act="acertoMais">Alguém jogou sem confirmar? Ver o resto da turma (${resto.length})</button>`;
+    else h += `<div class="pay-sec">Não confirmaram</div>` + listBox(resto.map(id => `<div class="pres">${avatar(P(id))}<div class="item-main"><div class="item-title">${esc(nameOf(id))}</div></div>${seg(id, extra[id] || 'fora', [['fora', 'Não foi'], ['azul', 'Azul'], ['amarelo', 'Amarelo']])}</div>`));
+  }
+  h += `<p class="sub" style="margin:12px 0 0;text-align:center"><b>${nAz}</b> no azul e <b>${nAm}</b> no amarelo.</p><div id="fErr" class="err" role="alert"></div><button class="btn btn-block btn-ball" style="margin-top:10px" data-act="acertoSalvar">Salvar o jogo de quarta</button>`;
+  return h;
 }
 
 // ================= Dia de jogo: times na mão, jogo em andamento e notas da galera (0 a 10) =================
@@ -4346,8 +4361,22 @@ const ACT = {
     else for (let i = g.sets.length - 1; i >= 0; i--) { const q = g.sets[i]; if (validSet(g, q) && (Number(q.pa) > Number(q.pb) ? q.a : q.b) === t) { g.sets.splice(i, 1); break; } }
     bumpRev(g); persist('games', g.id); render();
   },
-  acertoToggle: el => { const sh = S.ui.sheet; if (!sh || sh.type !== 'acerto') return; const id = el.dataset.pid, az = new Set(sh.azul || []); if (az.has(id)) az.delete(id); else az.add(id); sh.azul = [...az]; renderSheet(); },
-  acertoSalvar: () => { const sh = S.ui.sheet, g = sh && S.games[sh.gid]; if (!g) return; const az = (sh.azul || []).filter(P); if (az.length < 2) { $('#fErr').textContent = 'Marque quem jogou no time azul.'; return; } closeSheet(); aplicarAcerto(g, az); },
+  acertoSet: el => {
+    const sh = S.ui.sheet, g = sh && S.games[sh.gid]; if (!g || sh.type !== 'acerto') return;
+    const id = el.dataset.pid, v = el.dataset.v, inPool = acertoPool(g).includes(id), az = new Set(sh.azul || []);
+    if (inPool) { if (v === 'azul') az.add(id); else az.delete(id); sh.azul = [...az]; }
+    else { sh.extra = Object.assign({}, sh.extra); if (v === 'fora') delete sh.extra[id]; else sh.extra[id] = v; }
+    renderSheet();
+  },
+  acertoMais: () => { S.ui.acertoMais = true; renderSheet(); },
+  acertoSalvar: () => {
+    const sh = S.ui.sheet, g = sh && S.games[sh.gid]; if (!g) return;
+    const extra = sh.extra || {};
+    const az = [...new Set([...(sh.azul || []), ...Object.keys(extra).filter(k => extra[k] === 'azul')])].filter(P);
+    const am = Object.keys(extra).filter(k => extra[k] === 'amarelo').filter(P);
+    if (az.length < 2) { $('#fErr').textContent = 'Marque quem jogou no time azul.'; return; }
+    closeSheet(); aplicarAcerto(g, az, am);
+  },
   corrigirFinal: () => { const g = curGame(); if (!g || !canEditGame(g)) return; S.ui.editFinal = true; S.ui.step = 'times'; render(); window.scrollTo(0, 0); },
   verResultado: () => { S.ui.editFinal = false; S.ui.step = null; render(); window.scrollTo(0, 0); },
   retrySave: el => { const g = S.games[el.dataset.id]; if (!g) return; delete SAVE.err['games/' + g.id]; persist('games', g.id); render(); },
