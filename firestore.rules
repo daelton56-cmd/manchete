@@ -117,6 +117,10 @@ service cloud.firestore {
               && turmaDoc(request.resource.data.turma).data.ownerUid in request.resource.data.users)
           || (request.resource.data.status == 'accepted' && request.resource.data.via == 'migracao'
               && turmaDoc(request.resource.data.turma).data.ownerUid == me())))
+          || (request.resource.data.status == 'accepted' && request.resource.data.via == 'link'
+              && request.resource.data.k is string && request.resource.data.k.size() >= 8 && (
+                (request.resource.data.users[0] == me() && request.resource.data.k == get(/databases/$(database)/documents/users/$(request.resource.data.users[1])).data.get('friendCode', ''))
+                || (request.resource.data.users[1] == me() && request.resource.data.k == get(/databases/$(database)/documents/users/$(request.resource.data.users[0])).data.get('friendCode', ''))))
         );
       allow update: if signedIn() && me() in resource.data.users && resource.data.status == 'pending' && resource.data.from != me()
         && request.resource.data.status == 'accepted' && changed().hasOnly(['status', 'acceptedAt']);

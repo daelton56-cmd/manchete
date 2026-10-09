@@ -1231,7 +1231,7 @@ const dirty = () => { DER_DIRTY = true; };
 // e com o placar confirmado por alguém de outro time.
 const accountIds = g => teamIds(g).filter(id => { const p = S.players[id]; return !!(p && !p.guest && p.ownerUid); });
 const teamOfId = (g, id) => (g.teams || []).findIndex(t => t.includes(id));
-function needsConfirm(g) { return FBM() && !(S.turma && (S.turma.admins || []).includes(g.createdBy)); }
+function needsConfirm(g) { return FBM() && (espacoPessoal() || !(S.turma && (S.turma.admins || []).includes(g.createdBy))); }
 function confirmers(g) {
   const rev = g.resultRev || 0, acc = accountIds(g), ct = teamOfId(g, g.createdBy);
   return Object.entries(g.confirms || {}).filter(([u, r]) => r === rev && u !== g.createdBy && acc.includes(u) && (ct < 0 || teamOfId(g, u) !== ct)).map(([u]) => u);
@@ -1549,7 +1549,7 @@ function stopListening() {
   for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } }
   for (const m of [S.social.profiles, S.social.rosters]) { for (const off of m.values()) { try { off(); } catch (e) { } } m.clear(); }
 }
-function resetData() { S.contests = {}; S.notasDocs = {}; S.notasMine = {}; S.ui.notasPrompted = {}; stopAbertos(); S.abertos = {}; S.pedidosOrg = {}; S.pedidosMeus = {}; S.ui.abertoId = null; S.partidasOn = false; S.partidas = {}; S.pagos = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
+function resetData() { S.amigoSug = null; S.contests = {}; S.notasDocs = {}; S.notasMine = {}; S.ui.notasPrompted = {}; stopAbertos(); S.abertos = {}; S.pedidosOrg = {}; S.pedidosMeus = {}; S.ui.abertoId = null; S.partidasOn = false; S.partidas = {}; S.pagos = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
 function bootFirebase() {
   S.mode = 'auth-wait'; S.invite = readInvite(); render();
   const go = () => { if (S.authOff) return; S.authOff = window.MCloud.onAuth(u => onAuthChange(u)); };
@@ -1559,12 +1559,14 @@ function bootFirebase() {
 async function onAuthChange(u) {
   stopListening(); resetData(); closeSheet();
   let seen = false; try { seen = !!localStorage.getItem('manchete:jaEntrou'); } catch (e) { }
-  if (!u) { S.me = null; S.mode = 'signed-out'; S.authTab = S.invite && !seen ? 'criar' : 'entrar'; render(); return; }
+  if (!u) { S.me = null; S.mode = 'signed-out'; if (!S.amigoInv) S.amigoInv = readAmigoInvite(); S.authTab = (S.invite || S.amigoInv) && !seen ? 'criar' : 'entrar'; render(); return; }
   try { localStorage.setItem('manchete:jaEntrou', '1'); } catch (e) { }
   S.me = u; S.mode = 'auth-wait'; render();
   const ud = await window.MCloud.getUser(u.uid).catch(() => null);
   if (S.pendingName) S.me.name = S.pendingName; else if (ud && ud.name) S.me.name = ud.name;
   S.userTourDone = !!(ud && ud.tourDone);
+  S.friendCode = (ud && typeof ud.friendCode === 'string') ? ud.friendCode : '';
+  { const ai = S.amigoInv || readAmigoInvite(); if (ai) { S.amigoPend = ai; S.amigoInv = null; } }
   S.myPedidosIdx = (ud && ud.pedidos && typeof ud.pedidos === 'object') ? ud.pedidos : {};
   syncPublicProfile();
   S.notifSeenCloud = (ud && ud.notifSeen) || 0;
@@ -1581,11 +1583,12 @@ async function onAuthChange(u) {
     S.invite = null; clearInvite();
   }
   if (!t && ud && ud.lastTurma) t = ud.lastTurma;
-  if (!t) { S.mode = 'no-turma'; render(); loadMyTurmas(); return; }
+  if (!t) { S.mode = 'no-turma'; render(); loadMyTurmas(); if (S.amigoPend) setTimeout(processAmigo, 300); return; }
   openTurma(t);
+  if (S.amigoPend) setTimeout(processAmigo, 900);
 }
 function openTurma(t) {
-  stopListening(); resetData();
+  stopListening(); resetData(); S.contaNova = false;
   S.turmaId = t; S.mode = 'loading-cloud'; S.loadErr = false; render();
   window.MCloud.setUser(S.me.uid, { lastTurma: t }).catch(() => { });
   S.db = window.MCloud.db(t);
@@ -1777,6 +1780,7 @@ function notifData() {
     if (g.createdBy !== me && g.status !== 'encerrado' && g.date >= today && g.created) news.push({ kind: g.vis === 'privada' && g.allowed.includes(me) ? 'invite' : 'game', g, uid: g.createdBy, t: g.created });
     if (galeraMvp(g).includes(me)) news.push({ kind: 'mvp', g, t: new Date(voteCloseDate(g) + 'T23:00').getTime() });
   }
+  if (FBM()) for (const f of Object.values(S.friendships || {})) if (f && f.via === 'link' && f.status === 'accepted' && f.from === me && f.acceptedAt && Date.now() - f.acceptedAt < 14 * 864e5) news.push({ kind: 'amigoLink', nome: f.toNick || f.toName || 'Alguém', t: f.acceptedAt });
   if (FBM()) for (const g of Object.values(S.games)) if (contestado(g) && canEditGame(g)) act.push({ kind: 'contest', g, t: (g.contest && g.contest.at) || 0 });
   if (FBM()) for (const g of Object.values(S.games)) if (notasEstado(g) === 'aberta' && votantes(g).includes(me) && !notasDone(g, me)) act.push({ kind: 'notas', g, t: notasAbre(g) });
   if (FBM()) {
@@ -1822,6 +1826,7 @@ function notifsHTML() {
   if (sug.length) h += section('Sugestões para você', sugRow(sug));
   const text = n => {
     if (n.kind === 'acc') return `${fn(n.uid)} aceitou seu pedido de amizade.`;
+    if (n.kind === 'amigoLink') return `${esc(n.nome)} aceitou seu convite. Agora vocês são amigos.`;
     if (n.kind === 'pedOk') return `${esc(n.a.orgName)} aprovou seu pedido: jogo de ${esc(fmtDay(n.a.date).toLowerCase())}, ${esc(fmtTime(n.a.time))}.`;
     if (n.kind === 'pedNo') return `Seu pedido para o jogo de ${esc(fmtDay(n.a.date).toLowerCase())} não foi aprovado.`;
     if (n.kind === 'admin') return `${fn(n.uid)} te promoveu a admin do ${esc((S.turma && S.turma.name) || 'turma')}.`;
@@ -1859,9 +1864,9 @@ function authView() {
   const inv = S.invite;
   const isNew = S.authTab === 'criar';
   return `<section class="board" style="margin-top:20px">
-    <div class="board-label">${inv ? (inv.de ? `${esc(inv.de)} te convidou para` : 'Você foi convidado para') : 'Bem-vindo'}</div>
-    <div class="board-day" style="font-size:40px;margin:4px 0 6px">${inv && inv.n ? esc(inv.n) : 'Manchete'}</div>
-    <div class="board-place" style="margin:0">${inv ? `Crie sua conta para entrar na turma${inv.de ? ` e já chegar como amigo de ${esc(inv.de)}` : ''}. Se você já tem conta, é só entrar.` : 'As cartas, a agenda e a súmula do vôlei da galera.'}</div>
+    <div class="board-label">${inv ? (inv.de ? `${esc(inv.de)} te ${inv.g ? 'chamou para um jogo' : 'convidou para'}` : 'Você foi convidado para') : S.amigoInv ? `${esc(S.amigoInv.de || 'Alguém')} te convidou` : 'Bem-vindo'}</div>
+    <div class="board-day" style="font-size:40px;margin:4px 0 6px">${inv && inv.n && !/^Jogos de /.test(inv.n) ? esc(inv.n) : 'Manchete'}</div>
+    <div class="board-place" style="margin:0">${inv ? (inv.g ? 'Crie sua conta para ver o jogo e confirmar presença. Se você já tem conta, é só entrar.' : 'Crie sua conta para entrar na turma. Se você já tem conta, é só entrar.') : S.amigoInv ? `Crie sua conta e já chegue como amigo de ${esc(S.amigoInv.de || 'quem te chamou')}. Se você já tem conta, é só entrar.` : 'As cartas, a agenda e a súmula do vôlei da galera.'}</div>
   </section>
   ${!standalone() && /iPhone|iPad/.test(navigator.userAgent) ? `<div class="banner">No iPhone, toque em compartilhar e em <b>Adicionar à Tela de Início</b> antes de entrar. Depois abra pelo ícone.</div>` : ''}
   <div class="seg seg-full" role="group" aria-label="Entrar ou criar conta" style="margin:18px 0 14px;grid-template-columns:1fr 1fr">
@@ -1887,7 +1892,7 @@ function myTurmasList(currentId) {
 }
 function noTurmaView() {
   const others = S.myTurmas && S.myTurmas.length;
-  return `<div class="empty" style="margin-top:16px"><h3>${others ? 'Escolha uma turma' : 'Você ainda não está numa turma'}</h3><p class="sub">${S.authMsg ? esc(S.authMsg) + ' ' : ''}${others ? 'Abra uma das suas turmas, crie outra ou entre com um link de convite.' : 'Crie a sua e chame a galera pelo link, ou cole aqui o link de convite que te mandaram.'}</p></div>
+  return `<div class="empty" style="margin-top:16px"><h3>${others ? 'Escolha uma turma' : S.contaNova ? 'Bem-vindo ao Manchete' : 'Você ainda não está numa turma'}</h3><p class="sub">${S.authMsg ? esc(S.authMsg) + ' ' : ''}${others ? 'Abra uma das suas turmas, crie outra ou entre com um link de convite.' : 'Você não precisa de turma para jogar: crie sua carta, marque seus jogos e chame os amigos. Turma é para quem quer um grupo fixo, e dá para criar depois.'}</p>${others ? '' : '<button class="btn btn-block btn-ball" style="margin-top:12px" data-act="startSolo">Criar minha carta e começar</button>'}</div>
   ${others ? section('Suas turmas', myTurmasList(null)) : ''}
   ${section('Criar uma turma', `<label class="field"><span>Nome da turma</span><input class="input" id="tName" maxlength="40" placeholder="Ex.: Vôlei de quinta"></label><button class="btn btn-block btn-ball" data-act="createTurma">Criar turma</button>`)}
   ${section('Tenho um convite', `<label class="field"><span>Link de convite</span><input class="input" id="tLink" autocapitalize="off" spellcheck="false" placeholder="Cole o link aqui"></label><button class="btn btn-block" data-act="joinByLink">Entrar na turma</button>`)}
@@ -1903,7 +1908,7 @@ function agendaView() {
   const up = all.filter(g => g.status !== 'encerrado' && g.date >= t).sort(byDate);
   const toVote = all.filter(needsMyVote).sort(byDate).reverse()[0];
   const past = all.filter(g => !(g.status !== 'encerrado' && g.date >= t)).sort((a, b) => byDate(b, a));
-  let h = banners();
+  let h = banners() + amigoSugBanner();
   if (FBM()) setTimeout(maybeNotasPrompt, 50);
   if (FBM()) {
     const n = abertosNovos().length, tab = S.ui.homeTab || 'minhas';
@@ -2000,6 +2005,7 @@ function whoPlayedHTML(g) {
 function elencoSocial() {
   const filter = S.ui.elencoFilter || '', mine = P(meId());
   let h = banners();
+  h += `<div class="row" style="margin-top:12px"><button class="btn btn-block" data-act="convidarAmigos">${ICON.plus}Convidar amigos</button></div>`;
   h += searchBoxHTML();
   if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${esc(tierOf(ovrOf(mine)).name)} · ${ovrOf(mine)}</div>${mine.last && mine.last.d ? `<div class="nt-d ${mine.last.d > 0 ? 'up' : 'down'}">${mine.last.d > 0 ? '↑' : '↓'} ${Math.abs(mine.last.d)} no último jogo</div>` : ''}${friendIds().length ? `<div class="sub small">${plural(friendIds().length, 'amigo', 'amigos')}</div>` : ''}</div></div>`;
   if (!filter) { const sug = suggestions().filter(c => !S.players[c.id]); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
@@ -2008,7 +2014,7 @@ function elencoSocial() {
   const ps = [...new Set(ids)].filter(id => id !== meId()).map(P).filter(Boolean);
   const sorters = { ovr: (x, y) => ovrOf(y) - ovrOf(x), nome: (x, y) => (x.nick || x.name).localeCompare(y.nick || y.name, 'pt-BR'), pos: (x, y) => Object.keys(POS).indexOf(x.pos) - Object.keys(POS).indexOf(y.pos) || ovrOf(y) - ovrOf(x) };
   ps.sort(sorters[S.ui.sort] || sorters.ovr);
-  const tname = (S.turma && S.turma.name) || 'Turma', many = (S.myTurmas || []).length > 1;
+  const tname = espacoPessoal() && S.turma.ownerUid === meId() ? 'Quem joga com você' : ((S.turma && S.turma.name) || 'Turma'), many = (S.myTurmas || []).length > 1;
   h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px">${many
     ? `<button class="turma-switch" data-act="turmaMenu" aria-label="${esc(tname)}. Trocar de turma"><span class="h-sec" style="margin:0">${esc(tname)}</span>${ICON.down}</button>`
     : `<h2 class="h-sec" style="margin:0">${esc(tname)}</h2>`}<span class="spacer"></span><span class="sub small">${plural(Object.keys(S.players).length, 'jogador', 'jogadores')}</span></div>`;
@@ -2117,7 +2123,7 @@ function confirmBox(g) {
   if (FB() && hasResult(g) && contestado(g)) {
     if (canEditGame(g)) {
       const cs = contestsDe(g);
-      return `<div class="banner" style="flex-direction:column;align-items:stretch;gap:10px"><b>Placar contestado</b>${cs.map(c => `<span class="sub small">${esc(nameOf(c.createdBy))}: ${esc(c.motivo || 'sem motivo escrito')}</span>`).join('') || '<span class="sub small">Alguém que jogou contestou.</span>'}<span class="sub small">Até você revisar, a partida não conta nas cartas.</span><div class="row" style="gap:8px"><button class="btn btn-sm" style="flex:1" data-act="contestManter" data-id="${esc(g.id)}">Manter o placar</button><button class="btn btn-sm btn-ball" style="flex:1" data-act="corrigirFinal">Corrigir</button></div></div>`;
+      return `<div class="banner" style="flex-direction:column;align-items:stretch;gap:10px"><b>Placar contestado</b>${cs.map(c => `<span class="sub small">${esc(nameOf(c.createdBy))}: ${esc(c.motivo || 'sem motivo escrito')}</span>`).join('') || '<span class="sub small">Alguém que jogou contestou.</span>'}<span class="sub small">Até você revisar, a partida não conta nas cartas.</span><div class="row" style="gap:8px">${espacoPessoal() ? '' : `<button class="btn btn-sm" style="flex:1" data-act="contestManter" data-id="${esc(g.id)}">Manter o placar</button>`}<button class="btn btn-sm btn-ball" style="flex:1" data-act="corrigirFinal">Corrigir</button></div></div>`;
     }
     return `<div class="banner">Placar contestado. Até um admin revisar, a partida não conta nas cartas.</div>`;
   }
@@ -2387,7 +2393,9 @@ function renderSheet() {
   if (s.type === 'help') { title = 'Como funciona'; body = helpHTML(); }
   else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = gameFormHTML(s.id); }
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
-  else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
+  else if (s.type === 'perfil') { title = espacoPessoal() ? 'Você' : 'Você e a turma'; body = `<button class="btn btn-block btn-ball" style="margin-bottom:14px" data-act="convidarAmigos">Convidar amigos</button>` + perfilHTML(); }
+  else if (s.type === 'convidarAmigos') { title = 'Convidar amigos'; body = convidarAmigosHTML(); }
+  else if (s.type === 'amigoConvite') { const a = S.amigoConvite; if (!a) return closeSheet(); title = 'Convite de amizade'; body = `<p class="sub" style="margin:-4px 0 14px">${esc(a.de || 'Alguém')} te convidou para ser amigo no Manchete. Amigos veem os jogos uns dos outros e aparecem juntos no ranking.</p><button class="btn btn-block btn-ball" data-act="amigoAceitar">Adicionar ${esc(a.de || 'como amigo')}</button><button class="btn btn-block btn-ghost" style="margin-top:8px" data-act="closeSheet">Agora não</button>`; }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
   else if (s.type === 'porque') { const g = S.games[s.gid], p = P(s.pid); if (!g || !p) return closeSheet(); title = 'Por que a carta mudou'; body = porqueHTML(g, s.pid); }
   else if (s.type === 'contestar') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Contestar o placar'; body = `<p class="sub" style="margin:-4px 0 12px">Placar registrado: <b>${esc(scoreline(g) || '')}</b>. Os admins recebem a contestação, e até alguém revisar a partida não conta nas cartas.</p><label class="field"><span>O que está errado?</span><textarea class="input" id="ctMotivo" rows="3" maxlength="200" placeholder="Ex.: o azul ganhou o segundo set" style="padding:12px 14px;min-height:90px"></textarea></label><div id="fErr" class="err" role="alert"></div><button class="btn btn-block btn-ball" style="margin-top:8px" data-act="contestEnviar">Enviar para os admins</button>`; }
@@ -3238,9 +3246,15 @@ async function runAutoFriend() {
   if (!other || other === meId()) return;
   const id = pairId(meId(), other);
   if (S.friendships[id]) return;
-  const mine = myBasic();
-  const data = { users: [meId(), other].sort(), from: other, status: 'accepted', via: pa.by ? 'convite' : 'turma', k: pa.k, turma: S.turmaId, created: Date.now(), acceptedAt: Date.now(), toName: mine.name, toNick: mine.nick || '', toPhoto: '' };
-  try { await window.MCloud.friendSet(id, data); } catch (e) { }
+  S.amigoSug = { other, k: pa.k, by: !!pa.by, turma: S.turmaId }; render();
+}
+async function criarAmizadeTurma() {
+  const a = S.amigoSug; if (!a || a.turma !== S.turmaId) { S.amigoSug = null; render(); return; }
+  S.amigoSug = null;
+  const id = pairId(meId(), a.other), mine = myBasic();
+  const data = { users: [meId(), a.other].sort(), from: a.other, status: 'accepted', via: a.by ? 'convite' : 'turma', k: a.k, turma: S.turmaId, created: Date.now(), acceptedAt: Date.now(), toName: mine.name, toNick: mine.nick || '', toPhoto: '' };
+  try { await window.MCloud.friendSet(id, data); toast('Pronto, agora vocês são amigos.'); } catch (e) { toast('Não consegui adicionar agora.'); }
+  render();
 }
 // Migração de privacidade: roda uma vez, no aparelho de quem criou a turma.
 async function healPersonal() {
@@ -3534,6 +3548,69 @@ function cartaTxt(dd) {
   if (dd >= 0.05) return `<span class="nt-d up">carta ↑ ${fmtN(dd)}</span>`;
   if (dd <= -0.05) return `<span class="nt-d down">carta ↓ ${fmtN(-dd)}</span>`;
   return 'carta igual';
+}
+
+// ================= Perfil independente: começar sem turma e link de amizade =================
+const LS_AMIGO = 'manchete:amigoConvite';
+const espacoPessoal = () => !!(S.turma && S.turma.pessoal);
+function readAmigoInvite() {
+  try {
+    const q = new URLSearchParams(location.search), u = q.get('amigo'), k = q.get('k');
+    if (u && k) {
+      const inv = { u: u.slice(0, 80), k: k.slice(0, 40), de: (q.get('de') || '').slice(0, 24) };
+      localStorage.setItem(LS_AMIGO, JSON.stringify(inv));
+      try { history.replaceState(null, '', location.pathname); } catch (e) { }
+      return inv;
+    }
+    return JSON.parse(localStorage.getItem(LS_AMIGO)) || null;
+  } catch (e) { return null; }
+}
+function clearAmigoInvite() { try { localStorage.removeItem(LS_AMIGO); } catch (e) { } }
+function friendLink() {
+  if (!S.friendCode || !meId()) return '';
+  const who = String((myBasic().nick || myBasic().name || '')).trim().split(/\s+/)[0].slice(0, 24);
+  return `${location.origin}${location.pathname}?amigo=${encodeURIComponent(meId())}&k=${encodeURIComponent(S.friendCode)}&de=${encodeURIComponent(who)}`;
+}
+async function ensureFriendCode(novo) {
+  if (S.friendCode && !novo) return S.friendCode;
+  const a = new Uint8Array(12); crypto.getRandomValues(a);
+  const code = Array.from(a, x => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join('');
+  await window.MCloud.setUser(meId(), { friendCode: code });
+  S.friendCode = code; return code;
+}
+async function criarAmizadeLink(inv) {
+  const other = inv.u, id = pairId(meId(), other), mine = myBasic();
+  const data = { users: [meId(), other].sort(), from: other, status: 'accepted', via: 'link', k: inv.k, created: Date.now(), acceptedAt: Date.now(), toName: mine.name || '', toNick: mine.nick || '', toPhoto: '' };
+  try { await window.MCloud.friendSet(id, data); toast(`Pronto, agora você e ${inv.de || 'quem te chamou'} são amigos.`); }
+  catch (e) {
+    // Convite trocado, ou regras ainda não atualizadas: vira um pedido de amizade comum.
+    try { await window.MCloud.friendSet(id, { users: [meId(), other].sort(), from: meId(), status: 'pending', via: 'pedido', created: Date.now(), toName: '', fromName: mine.name || '' }); toast(`Pedido de amizade enviado para ${inv.de || 'quem te chamou'}.`); }
+    catch (e2) { toast('Não consegui adicionar agora. Tente abrir o link de novo.'); }
+  }
+}
+async function processAmigo() {
+  const inv = S.amigoPend; if (!inv || !meId() || !window.MCloud.friendGet) return;
+  S.amigoPend = null; clearAmigoInvite();
+  const novo = S.justSignedUp; S.justSignedUp = false;
+  if (inv.u === meId()) { toast('Este é o seu convite de amizade.'); return; }
+  let f = null; try { f = await window.MCloud.friendGet(pairId(meId(), inv.u)); } catch (e) { f = null; }
+  if (f && f.status === 'accepted') { toast(`Você e ${inv.de || 'essa pessoa'} já são amigos.`); return; }
+  if (f && f.status === 'pending' && f.from !== meId()) { try { await window.MCloud.friendAccept(pairId(meId(), inv.u)); toast(`Pronto, agora você e ${inv.de || 'quem te chamou'} são amigos.`); } catch (e) { } return; }
+  if (novo) return criarAmizadeLink(inv);
+  S.amigoConvite = inv; if (!S.ui.sheet) openSheet({ type: 'amigoConvite' });
+}
+function convidarAmigosHTML() {
+  const link = friendLink();
+  const msg = `Me adiciona no Manchete, o app do nosso vôlei: ${link}`;
+  return `<p class="sub" style="margin:-4px 0 12px">Mande para quem joga com você. Quem abrir vira seu amigo no Manchete, sem precisar de turma. Se a pessoa ainda não tiver conta, cria e já chega como amiga.</p>
+    <div class="ab-card" style="gap:8px"><span class="sub small" style="word-break:break-all">${esc(link)}</span></div>
+    <div style="display:grid;gap:10px;margin-top:12px"><a class="btn btn-block btn-ball" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">Mandar no WhatsApp</a><button class="btn btn-block" data-act="copyFriendLink">Copiar link</button></div>
+    <p style="text-align:center;margin-top:10px"><button class="link-btn quiet" data-act="trocarFriendLink">Trocar meu link</button></p><p class="sub small" style="text-align:center;margin:0">Trocar faz o link antigo virar um pedido comum, que você aprova.</p>`;
+}
+function amigoSugBanner() {
+  const a = S.amigoSug; if (!a || !FBM() || S.friendships[pairId(meId(), a.other)]) return '';
+  const nome = personName(a.other) || (P(a.other) && (P(a.other).nick || P(a.other).name)) || 'quem te chamou';
+  return `<div class="banner" style="flex-wrap:wrap"><span class="spacer">Quer adicionar ${esc(nome)} como amigo?</span><button class="btn btn-sm btn-ball" data-act="amigoSugOk">Adicionar</button><button class="btn btn-sm btn-ghost" data-act="amigoSugNao">Agora não</button></div>`;
 }
 
 // ================= Dia de jogo: times na mão, jogo em andamento e notas da galera (0 a 10) =================
@@ -4479,7 +4556,7 @@ const ACT = {
     if (!name) { err.textContent = 'Escreva seu nome.'; return; }
     if (!email) { err.textContent = 'Escreva seu e-mail.'; return; }
     if (pass.length < 6) { err.textContent = 'A senha precisa de pelo menos 6 caracteres.'; return; }
-    el.disabled = true; err.textContent = ''; S.pendingName = name;
+    el.disabled = true; err.textContent = ''; S.pendingName = name; S.justSignedUp = true; S.contaNova = true;
     try { await window.MCloud.signUp(name, email, pass); } catch (e) { S.pendingName = ''; err.textContent = authErr(e); el.disabled = false; }
   },
   resetPass: async () => {
@@ -4488,6 +4565,18 @@ const ACT = {
     try { await window.MCloud.resetPassword(email); err.textContent = ''; toast('Se esse e-mail tiver conta, chega um link para criar uma senha nova.'); } catch (e) { err.textContent = authErr(e); }
   },
   signOut: async () => { closeSheet(); try { await window.MCloud.signOut(); } catch (e) { toast('Não consegui sair agora.'); } },
+  startSolo: async el => {
+    const err = $('#tErr'); el.disabled = true;
+    const first = String((S.me && S.me.name) || 'você').trim().split(/\s+/)[0].slice(0, 24);
+    try { const r = await window.MCloud.createTurma(`Jogos de ${first}`, S.me, { pessoal: true }); S.authMsg = ''; openTurma(r.id); }
+    catch (e) { if (err) err.textContent = 'Não consegui começar agora. Confira a internet e tente de novo.'; el.disabled = false; }
+  },
+  convidarAmigos: async () => { if (S.ui.sheet) closeSheet(); try { await ensureFriendCode(); openSheet({ type: 'convidarAmigos' }); } catch (e) { toast('Não consegui gerar o seu link agora.'); } },
+  copyFriendLink: async () => { const l = friendLink(); try { await navigator.clipboard.writeText(l); toast('Link copiado.'); } catch (e) { toast(l); } },
+  trocarFriendLink: async () => { try { await ensureFriendCode(true); renderSheet(); toast('Link trocado. O antigo vira um pedido comum.'); } catch (e) { toast('Não consegui trocar agora.'); } },
+  amigoAceitar: async el => { const a = S.amigoConvite; if (!a) return closeSheet(); el.disabled = true; S.amigoConvite = null; closeSheet(); await criarAmizadeLink(a); render(); },
+  amigoSugOk: () => criarAmizadeTurma(),
+  amigoSugNao: () => { S.amigoSug = null; render(); },
   createTurma: async el => {
     const name = ($('#tName').value || '').trim().slice(0, 40), err = $('#tErr');
     if (!name) { err.textContent = 'Dê um nome para a turma.'; return; }
@@ -5339,11 +5428,11 @@ window.MCloud = {
   signOut: () => guard(signOut(auth)),
   getUser: uid => guard(getDoc(doc(fs, 'users', uid)).then(s => (s.exists() ? s.data() : null))),
   setUser: (uid, data) => guard(setDoc(doc(fs, 'users', uid), data, { merge: true })),
-  async createTurma(name, me) {
+  async createTurma(name, me, extra) {
     const ref = doc(collection(fs, 'turmas'));
     const c = code();
     const b = writeBatch(fs);
-    b.set(ref, { name, ownerUid: me.uid, admins: [me.uid], inviteCode: c, created: Date.now(), privacyV: 2 });
+    b.set(ref, Object.assign({ name, ownerUid: me.uid, admins: [me.uid], inviteCode: c, created: Date.now(), privacyV: 2 }, extra || {}));
     b.set(doc(fs, 'turmas', ref.id, 'membros', me.uid), { uid: me.uid, joinedAt: Date.now(), code: c });
     b.set(doc(fs, 'users', me.uid), { lastTurma: ref.id, turmas: arrayUnion(ref.id) }, { merge: true });
     await guard(b.commit());
@@ -5384,6 +5473,7 @@ window.MCloud = {
   // ---------- Amizades ----------
   watchFriendships: (uid, next, error) => onSnapshot(query(collection(fs, 'friendships'), where('users', 'array-contains', uid)), s => next(s.docs.map(d => ({ id: d.id, ...d.data() }))), e => error && error(fail(e))),
   friendSet: (id, data) => guard(setDoc(doc(fs, 'friendships', id), data)),
+  friendGet: id => getDoc(doc(fs, 'friendships', id)).then(d => (d.exists() ? d.data() : null)).catch(e => { throw fail(e); }),
   friendAccept: id => guard(updateDoc(doc(fs, 'friendships', id), { status: 'accepted', acceptedAt: Date.now() })),
   friendRemove: id => guard(deleteDoc(doc(fs, 'friendships', id))),
   watchMirrors: (uid, next, error) => onSnapshot(collection(fs, 'users', uid, 'amigos'), s => next(s.docs.map(d => ({ uid: d.id, ...d.data() }))), e => error && error(fail(e))),
