@@ -2511,8 +2511,11 @@ async function createElsewhere(el, where) {
       const rep = !!document.querySelector('[data-act="gRepeat"][aria-pressed="true"]'), gid = uid('g');
       const t = where[0], g = cleanGame(gid, { date, time, max, place, note, vis, allowed: vis === 'privada' ? [meId()] : [], created: Date.now(), createdBy: meId(), track: ['saq', 'rec'], nTeams: 2, repeat: rep, serie: rep ? gid : '', seq: rep ? 1 : 0 });
       const data = clone(g); delete data.conf; delete data.confirms; delete data.votes; delete data.rates;
-      await window.MCloud.db(t).doc('games/' + g.id).set(data);
-      closeSheet(); toast(`Jogo marcado na turma ${(S.myTurmas || []).find(x => x.id === t)?.name || ''}.`);
+      // Grava sem prender a tela e já leva a pessoa até o jogo, no espaço certo.
+      window.MCloud.db(t).doc('games/' + g.id).set(forStore('games', data)).catch(() => toast('Não consegui salvar o jogo. Confira a internet e tente de novo.'));
+      const alvo = (S.myTurmas || []).find(x => x.id === t) || {};
+      closeSheet(); S.openGameId = g.id; S.ui.tab = 'jogos'; openTurma(t);
+      toast(alvo.pessoal || /^Jogos de /.test(alvo.name || '') ? 'Jogo marcado. Agora chame a galera pelo link.' : `Jogo marcado na turma ${alvo.name || ''}.`);
       return;
     }
     const names = {}; for (const t of where) names[t] = ((S.myTurmas || []).find(x => x.id === t) || {}).name || 'Turma';
@@ -2537,7 +2540,8 @@ function repeatField(g, last) {
 }
 function whereField() {
   const list = (S.myTurmas && S.myTurmas.length ? S.myTurmas : [{ id: S.turmaId, name: (S.turma && S.turma.name) || 'Turma' }]);
-  return `<div class="field"><span>Onde</span><div class="row-wrap">${list.map(t => `<button class="chip" data-act="gWhere" data-t="${esc(t.id)}" aria-pressed="${t.id === S.turmaId}">${esc(t.name || 'Turma')}</button>`).join('')}</div>
+  const nome = t => (t.pessoal || /^Jogos de /.test(t.name || '')) && (t.ownerUid ? t.ownerUid === meId() : true) ? 'Só meu jogo' : (t.name || 'Turma');
+  return `<div class="field"><span>Onde</span><div class="row-wrap">${list.map(t => `<button class="chip" data-act="gWhere" data-t="${esc(t.id)}" aria-pressed="${t.id === S.turmaId}">${esc(nome(t))}</button>`).join('')}</div>
     <p class="sub small" id="gWhereHint" style="margin-top:8px" hidden></p></div>`;
 }
 function syncWhere() {
