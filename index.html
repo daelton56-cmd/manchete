@@ -613,6 +613,57 @@ input[type=date].input::-webkit-datetime-edit,input[type=time].input::-webkit-da
 .pq-row + .pq-row::before{content:""; position:absolute; top:0; left:16px; right:16px; height:1px; background:var(--line)}
 .pq-v{font-family:var(--display); font-weight:800; font-size:20px; font-variant-numeric:tabular-nums; flex:none}
 .pq-v.up{color:#16884A} .pq-v.down{color:#C2410C}
+
+/* ================= Novo jogo ================= */
+.nj{display:flex; flex-direction:column; gap:12px}
+.nj-lb{font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:6px 2px -4px}
+.nj-chips{display:flex; gap:8px; overflow-x:auto; padding:2px 2px 6px; scrollbar-width:none}
+.nj-chips::-webkit-scrollbar{display:none}
+.nj-ch{flex:none; border:0; border-radius:14px; min-height:50px; min-width:60px; padding:0 12px; background:var(--surface); color:var(--ink); font:inherit; font-weight:700; font-size:15px; box-shadow:var(--sh-1); display:inline-flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.15; transition:background-color .15s, transform .12s}
+.nj-ch small{font-weight:500; font-size:11px; color:var(--muted)}
+.nj-ch[aria-pressed="true"]{background:#0F2240; color:#fff}
+.nj-ch[aria-pressed="true"] small{color:#C9D5E6}
+.nj-ch:active{transform:scale(.96)}
+.nj-hora{min-height:44px}
+.nj-outro .field span{font-size:12px; color:var(--muted)}
+.nj-inp{display:flex; align-items:center; gap:10px; background:var(--surface); border-radius:16px; min-height:52px; padding:0 14px; box-shadow:inset 0 0 0 1px var(--line-strong)}
+.nj-inp:focus-within{box-shadow:inset 0 0 0 2px var(--focus)}
+.nj-inp input{border:0; outline:0; background:transparent; font:inherit; font-size:16px; color:var(--ink); flex:1; min-width:0; min-height:48px}
+.nj-inp svg{width:20px; height:20px; color:var(--muted); flex:none}
+.nj-valor{min-height:44px; width:130px; box-sizing:border-box; flex:none}
+.nj-valor input{min-height:40px}
+.nj-mini{display:flex; gap:6px; flex-wrap:wrap}
+.nj-mini .mc{border:0; border-radius:999px; min-height:36px; padding:0 12px; font:inherit; font-weight:600; font-size:13.5px; background:var(--surface-2); color:var(--ink)}
+.nj-mini .mc[aria-pressed="true"]{background:#0F2240; color:#fff}
+.nj-opts{display:grid; gap:10px}
+.nj-opt{display:flex; align-items:flex-start; gap:12px; width:100%; border:0; text-align:left; background:var(--surface); border-radius:20px; padding:14px; box-shadow:var(--sh-1); font:inherit; color:var(--ink); transition:box-shadow .15s}
+.nj-opt[aria-checked="true"]{box-shadow:inset 0 0 0 2px var(--ink), var(--sh-1)}
+.nj-oi{width:42px; height:42px; border-radius:14px; display:flex; align-items:center; justify-content:center; flex:none; background:var(--surface-2); color:var(--ink)}
+.nj-opt[aria-checked="true"] .nj-oi{background:#0F2240; color:#F7C531}
+.nj-oi svg{width:22px; height:22px}
+.nj-om{flex:1; min-width:0}
+.nj-ot{font-weight:700; font-size:16px; display:block}
+.nj-os{font-size:13.5px; line-height:1.35; color:var(--muted); display:block; margin-top:2px}
+.nj-rd{width:22px; height:22px; border-radius:50%; box-shadow:inset 0 0 0 2px var(--line-strong); flex:none; margin-top:10px}
+.nj-opt[aria-checked="true"] .nj-rd{box-shadow:inset 0 0 0 7px var(--ink)}
+.nj-sub{border-radius:18px; background:var(--surface); padding:14px; display:flex; flex-direction:column; gap:12px; box-shadow:inset 0 0 0 1px var(--line)}
+.nj-row{display:flex; align-items:center; gap:12px}
+.nj-rt{font-weight:600; font-size:15px; flex:1}
+.nj-card{background:var(--surface); border-radius:18px; padding:10px 14px; box-shadow:var(--sh-1); display:flex; align-items:center; gap:12px; min-height:56px}
+.nj-stp{display:flex; align-items:center; gap:6px}
+.nj-stp input{width:46px; text-align:center; border:0; background:transparent; font-family:var(--display); font-weight:900; font-size:24px; color:var(--ink); -moz-appearance:textfield}
+.nj-stp input::-webkit-outer-spin-button, .nj-stp input::-webkit-inner-spin-button{-webkit-appearance:none; margin:0}
+.nj-sb{width:40px; height:40px; border-radius:12px; border:0; background:var(--surface-2); color:var(--ink); font-size:20px; font-weight:700}
+.nj-sw{width:52px; height:32px; border-radius:999px; background:var(--line-strong); position:relative; border:0; flex:none; transition:background-color .2s}
+.nj-sw::after{content:""; position:absolute; left:3px; top:3px; width:26px; height:26px; border-radius:50%; background:#fff; transition:transform .2s}
+.nj-sw[aria-pressed="true"]{background:#0F2240}
+.nj-sw[aria-pressed="true"]::after{transform:translateX(20px); background:#F7C531}
+.nj-mais-btn{align-self:center}
+.nj [hidden], #njMaisBox[hidden], .nj-sub[hidden]{display:none !important}
+.nj-go{min-height:56px; font-size:17px; margin-top:6px}
+.nj-pronto{position:relative; background:linear-gradient(135deg,#FFF6D6 0%,#FFE29A 100%); color:#3B2A00; border-radius:20px; padding:14px 16px; display:flex; flex-direction:column; gap:10px; margin:12px 0}
+.nj-pronto .icon-btn{color:#3B2A00}
+.btn.nj-wa{background:#1F8A4C; color:#fff}
 @media (prefers-reduced-motion:reduce){
   .sheet, .sheet-bg{animation:none}
   .btn, .chip, .toggle, .card-btn, .item{transition:none}
@@ -1460,12 +1511,14 @@ function subscribe() {
   for (const kind of ['players', 'games']) {
     const listen = (attempt) => { const off = S.db.collection(kind).onSnapshot(snap => {
       applySnapshot(kind, snap);
+      if (kind === 'games') abrirPendente();
       got[kind] = true;
       if (!snap.metadata.fromCache) firm[kind] = true;
       if (got.players && got.games && S.mode === 'loading-cloud') {
         S.mode = 'cloud';
-        if (S.openGameId && S.games[S.openGameId]) { if (gameVisible(S.games[S.openGameId])) { S.ui.gameId = S.openGameId; S.ui.step = null; } else setTimeout(() => toast('Essa partida é privada. Peça para quem marcou te convidar.'), 300); }
-        S.openGameId = null;
+        if (S.openGameId && S.games[S.openGameId]) { if (gameVisible(S.games[S.openGameId])) { S.ui.gameId = S.openGameId; S.ui.step = null; } else setTimeout(() => toast('Essa partida é privada. Peça para quem marcou te convidar.'), 300); S.openGameId = null; }
+        else if (S.openGameId) S.openGameDesde = Date.now();
+        abrirPendente();
         if (FB() && !S.players[meId()]) setTimeout(() => { if (FB() && !S.players[meId()] && !S.ui.sheet) ACT.newSelf(); }, 60);
       }
       if (got.players && got.games && S.mode === 'cloud') upgradeData();
@@ -2157,6 +2210,7 @@ function gameView(g) {
   const conf = g.conf.filter(P).length;
   const st = (k, n, l) => `<button class="step" data-act="step" data-step="${k}" ${step === k ? 'aria-current="step"' : ''}><b>${n}</b>${l}</button>`;
   let h = gameHead(g) + confirmBox(g);
+  if (FBM() && S.ui.recemCriado === g.id) h += njProntoHTML(g);
   if (FBM() && g.status === 'encerrado') h += `<div class="banner" style="background:transparent;border:1px solid var(--line-strong)"><span class="spacer">Corrigindo um jogo encerrado. As cartas e o ranking se ajustam sozinhos.</span><button class="btn btn-sm btn-ball" data-act="verResultado">Ver resultado</button></div>`;
   if (FBM()) h += `<nav class="steps" aria-label="Etapas do jogo">${st('presenca', 1, 'Presença')}${st('times', 2, 'Times')}${st('jogo', 3, 'Jogo')}${st('notas', 4, 'Notas')}</nav>`;
   else h += `<nav class="steps" aria-label="Etapas do jogo">${st('presenca', 1, 'Presença')}${st('times', 2, 'Times')}${st('sumula', 3, 'Súmula')}${st('placar', 4, 'Placar')}</nav>`;
@@ -2391,7 +2445,7 @@ function renderSheet() {
   if (!s) return closeSheet();
   let title = '', body = '';
   if (s.type === 'help') { title = 'Como funciona'; body = helpHTML(); }
-  else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = gameFormHTML(s.id); }
+  else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = !s.id && FB() ? novoJogoHTML() : gameFormHTML(s.id); }
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = espacoPessoal() ? 'Você' : 'Você e a turma'; body = `<button class="btn btn-block btn-ball" style="margin-bottom:14px" data-act="convidarAmigos">Convidar amigos</button>` + perfilHTML(); }
   else if (s.type === 'convidarAmigos') { title = 'Convidar amigos'; body = convidarAmigosHTML(); }
@@ -2563,10 +2617,10 @@ const VIS_HINT = {
   amigos: 'Seus amigos veem e confirmam presença.',
   aberto: 'A turma vê, e logo depois de criar você escolhe quantas vagas abrir para quem é de fora.'
 };
-function visField(g) {
+function visField(g, semAberto) {
   const vis = g ? g.vis : 'turma', conv = vis === 'amigos' || vis === 'privada';
-  return `<div class="field"><span>Quem vê o jogo</span>
-    <div class="seg seg-full" id="gVisMain" style="grid-template-columns:1fr 1fr 1fr" role="group" aria-label="Quem vê o jogo"><button data-act="gVis" data-v="turma" aria-pressed="${vis === 'turma'}">Toda a turma</button><button data-act="gVisConv" aria-pressed="${conv}">Convidados</button>${g ? '' : '<button data-act="gVisAberto" aria-pressed="false">Aberto</button>'}</div>
+  return `<div class="field"><span>${semAberto ? 'Quem da turma vê' : 'Quem vê o jogo'}</span>
+    <div class="seg seg-full" id="gVisMain" style="grid-template-columns:${semAberto ? '1fr 1fr' : '1fr 1fr 1fr'}" role="group" aria-label="Quem vê o jogo"><button data-act="gVis" data-v="turma" aria-pressed="${vis === 'turma'}">Toda a turma</button><button data-act="gVisConv" aria-pressed="${conv}">Convidados</button>${g || semAberto ? '' : '<button data-act="gVisAberto" aria-pressed="false">Aberto</button>'}</div>
     <div id="gConv" style="margin-top:8px" ${conv ? '' : 'hidden'}><div class="seg seg-full" style="grid-template-columns:1fr 1fr" role="group" aria-label="Quais convidados"><button data-act="gVis" data-v="privada" aria-pressed="${vis === 'privada'}">Escolher pessoas</button><button data-act="gVis" data-v="amigos" aria-pressed="${vis === 'amigos'}">Meus amigos</button></div></div>
     <p class="sub small" id="gVisHint" style="margin-top:8px">${esc(VIS_HINT[vis] || VIS_HINT.turma)}</p></div>`;
 }
@@ -3615,6 +3669,139 @@ function amigoSugBanner() {
   const a = S.amigoSug; if (!a || !FBM() || S.friendships[pairId(meId(), a.other)]) return '';
   const nome = personName(a.other) || (P(a.other) && (P(a.other).nick || P(a.other).name)) || 'quem te chamou';
   return `<div class="banner" style="flex-wrap:wrap"><span class="spacer">Quer adicionar ${esc(nome)} como amigo?</span><button class="btn btn-sm btn-ball" data-act="amigoSugOk">Adicionar</button><button class="btn btn-sm btn-ghost" data-act="amigoSugNao">Agora não</button></div>`;
+}
+
+// ================= Novo jogo: uma pergunta só, "quem pode entrar" =================
+const NJ_ICON = {
+  eu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>',
+  turma: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/></svg>',
+  aberto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+  pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>'
+};
+const DIA_CURTO = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const ehPessoal = t => !!t && (t.pessoal === true || /^Jogos de /.test(t.name || '')) && (!t.ownerUid || t.ownerUid === meId());
+function turmasDeVerdade() {
+  const l = (S.myTurmas || []).filter(t => !ehPessoal(t));
+  if (S.turma && !S.turma.pessoal && !l.some(t => t.id === S.turmaId)) l.unshift({ id: S.turmaId, name: S.turma.name || 'Turma' });
+  return l;
+}
+function lugaresRecentes() {
+  const seen = new Set(), out = [];
+  const all = [...Object.values(S.games), ...Object.values(S.partidas || {})].sort((a, b) => (b.created || 0) - (a.created || 0));
+  for (const g of all) { const p = String(g.place || '').trim(); if (p && !seen.has(p.toLowerCase())) { seen.add(p.toLowerCase()); out.push(p); } if (out.length >= 3) break; }
+  return out;
+}
+function novoJogoHTML() {
+  const last = Object.values(S.games).sort(byDate).pop();
+  const d = { date: nextDateLike(last), time: last ? last.time : '20:00', place: last ? last.place : '', max: last ? last.max : 12 };
+  const quem = S.turma && !S.turma.pessoal ? 't:' + S.turmaId : 'eu';
+  const hoje = todayStr(), dias = Array.from({ length: 7 }, (_, i) => addDays(hoje, i));
+  const dd = dt => `${dt.slice(8, 10)}/${dt.slice(5, 7)}`;
+  const nomeDia = (dt, i) => i === 0 ? 'Hoje' : i === 1 ? 'Amanhã' : DIA_CURTO[new Date(dt + 'T12:00').getDay()];
+  const horas = ['18:00', '19:00', '20:00', '21:00'];
+  const lugares = lugaresRecentes();
+  const opt = (v, icon, t, sub) => `<button class="nj-opt" role="radio" data-act="njQuem" data-v="${esc(v)}" aria-checked="${quem === v}"><span class="nj-oi">${icon}</span><span class="nj-om"><span class="nj-ot">${esc(t)}</span><span class="nj-os">${esc(sub)}</span></span><span class="nj-rd" aria-hidden="true"></span></button>`;
+  return `<div class="nj">
+  <div class="nj-lb">Quando</div>
+  <div class="nj-chips" role="group" aria-label="Dia">${dias.map((dt, i) => `<button class="nj-ch" data-act="njDia" data-v="${dt}" aria-pressed="${dt === d.date}">${nomeDia(dt, i)}<small>${dd(dt)}</small></button>`).join('')}</div>
+  <div class="nj-chips" role="group" aria-label="Horário">${horas.map(x => `<button class="nj-ch nj-hora" data-act="njHora" data-v="${x}" aria-pressed="${x === d.time}">${x.slice(0, 2)}h</button>`).join('')}</div>
+  <div class="grid2 nj-outro"><label class="field"><span>Outro dia</span><input class="input" type="date" id="fDate" value="${esc(d.date)}"></label><label class="field"><span>Outro horário</span><input class="input" type="time" id="fTime" value="${esc(d.time)}"></label></div>
+  <div class="nj-lb">Onde</div>
+  <label class="nj-inp">${NJ_ICON.pin}<input type="text" id="fPlace" maxlength="80" value="${esc(d.place)}" placeholder="Nome da quadra" aria-label="Local"></label>
+  ${lugares.length ? `<div class="nj-mini">${lugares.map(p => `<button class="mc nj-lugar" data-act="njLugar" data-v="${esc(p)}">${esc(p)}</button>`).join('')}</div>` : ''}
+  <div class="nj-lb">Quem pode entrar</div>
+  <div class="nj-opts" role="radiogroup" aria-label="Quem pode entrar">
+    ${opt('eu', NJ_ICON.eu, 'Só quem eu chamar', 'Você manda o link pelo WhatsApp.')}
+    ${turmasDeVerdade().map(t => opt('t:' + t.id, NJ_ICON.turma, t.name || 'Turma', 'A turma toda vê e confirma.')).join('')}
+    ${opt('aberto', NJ_ICON.aberto, 'Aberto ao público', 'Aparece para quem joga perto. Você aprova quem pede vaga.')}
+  </div>
+  <div class="nj-sub" id="njAberto" hidden>
+    <div class="nj-row"><span class="nj-rt">Vagas para quem é de fora</span><span class="nj-stp"><button class="nj-sb" data-act="njPasso" data-alvo="abVagas2" data-d="-1" aria-label="Menos uma vaga para quem é de fora">−</button><input id="abVagas2" type="number" inputmode="numeric" min="1" max="40" value="2" aria-label="Vagas para quem é de fora"><button class="nj-sb" data-act="njPasso" data-alvo="abVagas2" data-d="1" aria-label="Mais uma vaga para quem é de fora">+</button></span></div>
+    <div><div class="nj-rt" style="margin-bottom:8px">Nível do jogo</div><div class="nj-mini" role="group" aria-label="Nível do jogo">${Object.entries(NIVEIS).map(([k, v]) => `<button class="mc" data-act="njNivel" data-v="${k}" aria-pressed="${k === 'misto'}">${esc(k === 'int' ? 'Médio' : v)}</button>`).join('')}</div></div>
+    <div class="nj-row"><span class="nj-rt">Valor por pessoa</span><label class="nj-inp nj-valor"><span class="sub">R$</span><input id="abValor2" type="text" inputmode="decimal" placeholder="Grátis" aria-label="Valor por pessoa, em reais"></label></div>
+    <input type="hidden" id="abLat2" value=""><input type="hidden" id="abLng2" value="">
+    <button class="btn btn-block" data-act="njGeo">${NJ_ICON.pin}Marcar a quadra no mapa</button>
+    <p class="sub small" id="njGeoMsg" style="margin:-4px 0 0">Para mostrar a distância a quem procura jogo. Só aparece o local da quadra.</p>
+  </div>
+  <div class="nj-card"><span class="nj-rt">Vagas no total</span><span class="nj-stp"><button class="nj-sb" data-act="njPasso" data-alvo="fMax" data-d="-1" aria-label="Menos uma vaga">−</button><input id="fMax" type="number" inputmode="numeric" min="0" max="60" value="${d.max || ''}" placeholder="–" aria-label="Vagas no total"><button class="nj-sb" data-act="njPasso" data-alvo="fMax" data-d="1" aria-label="Mais uma vaga">+</button></span></div>
+  <div class="nj-card"><span class="nj-rt">Repetir toda semana</span><button class="nj-sw" data-act="gRepeat" aria-pressed="${!!(last && last.repeat)}" aria-label="Repetir toda semana"></button></div>
+  <label class="field"><span>Observação</span><input class="input" type="text" id="fNote" maxlength="300" placeholder="Opcional: levar bola, valor da quadra"></label>
+  <button class="link-btn quiet nj-mais-btn" data-act="gMais" aria-expanded="false">Mais opções</button>
+  <div id="njMaisBox" hidden>${turmasDeVerdade().length ? visField(null, true) : ''}${(S.myTurmas || []).length > 1 ? `<p class="sub small" style="margin:10px 0 6px">Jogo entre turmas: marque mais de uma e ele vira amistoso, que não mexe nas cartas.</p>${whereField()}` : ''}</div>
+  <div id="fErr" class="err" role="alert"></div>
+  <button class="btn btn-block btn-ball nj-go" data-act="saveGame" data-id="">Marcar jogo</button>
+  </div>`;
+}
+async function garantirEspaco() {
+  if (S.turma && S.turma.pessoal && S.turma.ownerUid === meId()) return S.turmaId;
+  const mine = (S.myTurmas || []).find(ehPessoal);
+  if (mine) return mine.id;
+  const first = String((S.me && S.me.name) || 'você').trim().split(/\s+/)[0].slice(0, 24);
+  const r = await window.MCloud.createTurma(`Jogos de ${first}`, S.me, { pessoal: true });
+  // A carta vai junto, para o app não pedir de novo.
+  const p = P(meId());
+  if (p) {
+    const at = Object.assign({}, (p.base && p.base.at) || p.at);
+    await window.MCloud.db(r.id).doc('players/' + meId()).set({ pos: p.pos, pos2: p.pos2 || [], level: p.level || null, base: { at }, adj: [], created: Date.now(), updated: Date.now(), ownerUid: meId(), guest: false, createdBy: meId(), locked: false });
+    await window.MCloud.db(r.id).doc('profiles/' + meId()).set({ name: p.name || '', nick: p.nick || '', photo: p.photo || '', height: p.height || 0, birthYear: p.birthYear || 0 });
+  }
+  loadMyTurmas();
+  return r.id;
+}
+async function salvarNovoJogo(el) {
+  const err = $('#fErr');
+  if (S.ui.njEntreTurmas) {
+    const where = [...document.querySelectorAll('[data-act="gWhere"][aria-pressed="true"]')].map(b => b.dataset.t);
+    if (where.length !== 1 || where[0] !== S.turmaId) return createElsewhere(el, where);
+  }
+  const date = $('#fDate').value, time = $('#fTime').value || '20:00';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { err.textContent = 'Escolha o dia do jogo.'; return; }
+  const max = clamp(parseInt($('#fMax').value, 10) || 0, 0, 60), place = $('#fPlace').value.trim().slice(0, 80), note = ($('#fNote').value || '').trim().slice(0, 300);
+  const quem = ((document.querySelector('[data-act="njQuem"][aria-checked="true"]') || {}).dataset || {}).v || 'eu';
+  const rep = !!document.querySelector('[data-act="gRepeat"][aria-pressed="true"]');
+  let vis = 'turma', allowed = [], aberto = null;
+  if (quem.startsWith('t:')) { const lv = lerVis(); vis = lv.vis || 'turma'; allowed = vis === 'privada' ? [meId()] : []; }
+  if (quem === 'aberto') {
+    if (!place) { err.textContent = 'Coloque o nome da quadra: é o que aparece para quem procura jogo.'; $('#fPlace').focus(); return; }
+    const lat = parseFloat($('#abLat2').value), lng = parseFloat($('#abLng2').value);
+    const valor = parseFloat(String($('#abValor2').value || '').replace(',', '.')) || 0;
+    const nivel = ((document.querySelector('[data-act="njNivel"][aria-pressed="true"]') || {}).dataset || {}).v || 'misto';
+    aberto = cleanAbertoCfg({ on: true, vis: 'todos', vagas: parseInt($('#abVagas2').value, 10) || 2, nivel, preco: { modo: 'fixo', valor, custo: 0, minimo: 0 }, quadra: place, endereco: '', lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null });
+  }
+  el.disabled = true;
+  let dest = quem.startsWith('t:') ? quem.slice(2) : null;
+  try { if (!dest) dest = await garantirEspaco(); }
+  catch (e) { el.disabled = false; err.textContent = 'Não consegui preparar o seu jogo. Confira a internet e tente de novo.'; return; }
+  const last = Object.values(S.games).sort(byDate).pop(), gid = uid('g');
+  const g = cleanGame(gid, { date, time, max, place, note, vis, allowed, created: Date.now(), createdBy: meId(), track: last ? last.track : ['saq', 'rec'], nTeams: 2, repeat: rep, serie: rep ? gid : '', seq: rep ? 1 : 0, aberto });
+  S.ui.recemCriado = g.id;
+  if (dest === S.turmaId) {
+    S.games[g.id] = g; persist('games', g.id);
+    closeSheet(); S.ui.gameId = g.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0);
+    if (aberto) publicarAberto(g).catch(() => toast('O jogo foi marcado, mas as vagas não foram publicadas. Tente em "Abrir vagas".'));
+  } else {
+    const data = clone(g); delete data.conf; delete data.confirms; delete data.votes; delete data.rates;
+    window.MCloud.db(dest).doc('games/' + g.id).set(forStore('games', data)).catch(() => toast('Não consegui salvar o jogo. Confira a internet e tente de novo.'));
+    closeSheet(); S.openGameId = g.id; S.pendAberto = aberto ? g.id : null; S.ui.tab = 'jogos'; openTurma(dest);
+  }
+  toast(quem === 'aberto' ? 'Jogo marcado e aberto para quem joga perto.' : 'Jogo marcado.');
+}
+// Jogo criado em outro espaço: abre assim que ele chega (até 10 segundos) e publica as vagas, se for aberto.
+function abrirPendente() {
+  if (S.mode !== 'cloud') return;
+  if (S.openGameId) {
+    const g = S.games[S.openGameId];
+    if (g) { if (gameVisible(g)) { S.ui.gameId = g.id; S.ui.step = 'presenca'; } S.openGameId = null; S.openGameDesde = 0; setTimeout(render, 0); }
+    else if (S.openGameDesde && Date.now() - S.openGameDesde > 10000) { S.openGameId = null; S.openGameDesde = 0; }
+  }
+  if (S.pendAberto && S.games[S.pendAberto] && S.games[S.pendAberto].aberto && S.firmData) { const ga = S.games[S.pendAberto]; S.pendAberto = null; setTimeout(() => publicarAberto(ga).catch(() => toast('O jogo foi marcado, mas as vagas não foram publicadas. Tente em "Abrir vagas".')), 600); }
+}
+function njProntoHTML(g) {
+  const who = String((myBasic().nick || myBasic().name || '')).trim().split(/\s+/)[0];
+  const link = inviteLink(g.id);
+  const msg = `${who ? who + ' te chamou' : 'Bora'} pra um vôlei! ${fmtDay(g.date)}, ${fmtTime(g.time)}${g.place ? ', no ' + g.place : ''}. Confirma aqui: ${link}`;
+  return `<div class="nj-pronto"><div class="row" style="align-items:flex-start"><div class="item-main"><b style="font-size:17px">Jogo marcado! Agora chame a galera.</b><div class="sub small" style="color:#5A4A1E;margin-top:2px">Quem abrir o link cai direto no jogo. Sem conta, cria em um minuto e já confirma.</div></div><button class="icon-btn" data-act="njFechar" aria-label="Fechar aviso">${ICON.x}</button></div>
+    <div class="row" style="gap:8px"><a class="btn btn-sm nj-wa" style="flex:1" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">Mandar no WhatsApp</a><button class="btn btn-sm" style="flex:1" data-act="njCopiar" data-id="${esc(g.id)}">Copiar link</button></div></div>`;
 }
 
 // ================= Dia de jogo: times na mão, jogo em andamento e notas da galera (0 a 10) =================
@@ -4905,7 +5092,8 @@ const ACT = {
   rankSort: el => { S.ui.rankSort = el.dataset.sort; render(); },
   openGame: el => { if (!gameVisible(S.games[el.dataset.id])) return toast('Essa partida é privada.'); if (S.ui.sheet) closeSheet(); S.ui.editFinal = false; S.ui.gameId = el.dataset.id; syncSocial(); S.ui.step = null; S.ui.selP = null; S.ui.swapSel = null; S.ui.openRep = null; S.ui.flash = ''; render(); window.scrollTo(0, 0); },
   step: el => { S.ui.step = el.dataset.step; S.ui.swapSel = null; render(); window.scrollTo(0, 0); },
-  newGame: () => openSheet({ type: 'gameForm' }),
+  newGame: () => { S.ui.njEntreTurmas = false; return ACT.newGame0(); },
+  newGame0: () => openSheet({ type: 'gameForm' }),
   editGame: () => { const g = curGame(); if (g && canEditGame(g)) openSheet({ type: 'gameForm', id: g.id }); },
   rateP: el => {
     const g = S.games[el.dataset.gid], pid = el.dataset.pid, v = Number(el.dataset.v);
@@ -4917,8 +5105,24 @@ const ACT = {
     clearTimeout(RATE_T); RATE_T = setTimeout(() => { const cur = (S.games[g.id] && S.games[g.id].rates || {})[meId()] || {}; S.db.rate(g.id, meId(), cur).catch(() => toast('Não consegui salvar a nota. Tente de novo.')); }, 600);
   },
   gRepeat: el => el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')),
-  gWhere: el => { el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')); syncWhere(); },
+  gWhere: el => { S.ui.njEntreTurmas = true; el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')); syncWhere(); },
+  njDia: el => { $('#fDate').value = el.dataset.v; document.querySelectorAll('[data-act="njDia"]').forEach(b => b.setAttribute('aria-pressed', String(b === el))); },
+  njHora: el => { $('#fTime').value = el.dataset.v; document.querySelectorAll('[data-act="njHora"]').forEach(b => b.setAttribute('aria-pressed', String(b === el))); },
+  njLugar: el => { $('#fPlace').value = el.dataset.v; },
+  njQuem: el => {
+    document.querySelectorAll('[data-act="njQuem"]').forEach(b => b.setAttribute('aria-checked', String(b === el)));
+    const v = el.dataset.v, ab = $('#njAberto'); if (ab) ab.hidden = v !== 'aberto';
+    const vf = document.querySelector('#njMaisBox #gVisMain'); if (vf) vf.closest('.field').hidden = !v.startsWith('t:');
+    $('#fErr').textContent = '';
+  },
+  njNivel: el => { document.querySelectorAll('[data-act="njNivel"]').forEach(b => b.setAttribute('aria-pressed', String(b === el))); },
+  njPasso: el => { const i = $('#' + el.dataset.alvo); if (!i) return; const lo = Number(i.min || 0), hi = Number(i.max || 99); i.value = clamp((parseInt(i.value, 10) || 0) + Number(el.dataset.d), lo, hi); },
+  njGeo: async () => { const m = $('#njGeoMsg'); try { const p = await getGeo(); $('#abLat2').value = p.lat; $('#abLng2').value = p.lng; if (m) m.textContent = 'Quadra marcada no mapa. Quem procura jogo vê a distância.'; } catch (e) { if (m) m.textContent = 'Não consegui pegar a localização. Confira a permissão do navegador.'; } },
+  gMais: el => { const b = $('#njMaisBox'); if (!b) return; b.hidden = !b.hidden; el.setAttribute('aria-expanded', String(!b.hidden)); el.textContent = b.hidden ? 'Mais opções' : 'Menos opções'; const q = (document.querySelector('[data-act="njQuem"][aria-checked="true"]') || {}).dataset; const vf = b.querySelector('#gVisMain'); if (vf) vf.closest('.field').hidden = !(q && q.v && q.v.startsWith('t:')); },
+  njFechar: () => { S.ui.recemCriado = null; render(); },
+  njCopiar: async el => { const l = inviteLink(el.dataset.id); try { await navigator.clipboard.writeText(l); toast('Link copiado.'); } catch (e) { toast(l); } },
   saveGame: el => {
+    if (!el.dataset.id && FB() && document.querySelector('[data-act="njQuem"]')) return salvarNovoJogo(el);
     const date = $('#fDate').value, time = $('#fTime').value || '20:00';
     const whereBtns = [...document.querySelectorAll('[data-act="gWhere"]')];
     const where = whereBtns.filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.t);
