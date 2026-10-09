@@ -464,6 +464,112 @@ input[type=date].input::-webkit-datetime-edit,input[type=time].input::-webkit-da
 .tiers{display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin:8px 0}
 .tiers div{border-radius:8px; padding:8px 4px; text-align:center; font-size:12px; font-weight:600; background:var(--c-bg); color:var(--c-ink)}
 .loading{padding:60px 0; text-align:center; color:var(--muted)}
+
+/* ================= Polimento v1: base visual =================
+   Menos linha, mais profundidade: superfícies sem borda com sombra suave, cantos maiores,
+   botões tonais, filtros em pílula, barra de baixo flutuante e cartas com metal. */
+:root{
+  --bg:#F4F6FA; --surface:#FFFFFF; --surface-2:#E9EDF3; --line:rgba(15,34,64,.08); --line-strong:rgba(15,34,64,.18);
+  --sh-1:0 1px 2px rgba(15,34,64,.05),0 6px 20px rgba(15,34,64,.06);
+  --sh-2:0 2px 6px rgba(15,34,64,.06),0 16px 36px rgba(15,34,64,.12);
+  --r-card:22px; --r-btn:14px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){ --bg:#0B1D38; --surface:#132C52; --surface-2:#1B3962; --line:rgba(255,255,255,.08); --line-strong:rgba(255,255,255,.2);
+    --sh-1:inset 0 1px 0 rgba(255,255,255,.04),0 8px 22px rgba(0,0,0,.28); --sh-2:inset 0 1px 0 rgba(255,255,255,.05),0 16px 36px rgba(0,0,0,.4); }
+}
+:root[data-theme="dark"]{ --bg:#0B1D38; --surface:#132C52; --surface-2:#1B3962; --line:rgba(255,255,255,.08); --line-strong:rgba(255,255,255,.2);
+  --sh-1:inset 0 1px 0 rgba(255,255,255,.04),0 8px 22px rgba(0,0,0,.28); --sh-2:inset 0 1px 0 rgba(255,255,255,.05),0 16px 36px rgba(0,0,0,.4); }
+
+/* Topo: sem linha, com vidro */
+.top{border-bottom:0; background:color-mix(in srgb, var(--bg) 86%, transparent); -webkit-backdrop-filter:saturate(1.6) blur(16px); backdrop-filter:saturate(1.6) blur(16px)}
+.icon-btn{border:0; background:transparent; transition:background-color .2s}
+.icon-btn:active{background:var(--surface-2)}
+
+/* Barra de baixo flutuante */
+.tabs{left:12px; right:12px; bottom:calc(10px + env(safe-area-inset-bottom,0px)); max-width:536px; margin:0 auto; border-top:0; border-radius:24px; padding-bottom:0;
+  background:color-mix(in srgb, var(--surface) 92%, transparent); -webkit-backdrop-filter:saturate(1.6) blur(18px); backdrop-filter:saturate(1.6) blur(18px); box-shadow:0 10px 34px rgba(15,34,64,.16)}
+.tabs::after{display:none}
+.tab{padding:7px 0 8px; gap:3px}
+.tab svg{box-sizing:content-box; padding:4px 18px; border-radius:999px; transition:background-color .2s}
+.tab[aria-current="page"] svg{background:color-mix(in srgb, var(--ball) 55%, transparent)}
+.tab[aria-current="page"] span{box-shadow:none}
+.wrap{padding-bottom:calc(112px + env(safe-area-inset-bottom,0px))}
+.toast{bottom:calc(98px + env(safe-area-inset-bottom,0px)); border-radius:16px; box-shadow:var(--sh-2)}
+
+/* Botões: tonais, sem contorno; o amarelo é a ação principal */
+.btn{border:0; border-radius:var(--r-btn); background:var(--surface-2); color:var(--ink); font-weight:700; transition:transform .12s ease, background-color .2s, filter .2s}
+.btn:active:not(:disabled){transform:scale(.97)}
+.btn-ball{background:var(--ball); color:var(--ball-ink); box-shadow:0 8px 18px -10px rgba(150,110,0,.65)}
+.btn-ghost{background:transparent}
+.btn-danger{background:color-mix(in srgb, var(--neg) 11%, transparent); color:var(--neg); border:0}
+.btn-sm{border-radius:12px}
+.board .btn.board-ghost{border:0; background:rgba(255,255,255,.13); color:var(--board-ink)}
+
+/* Filtros e seletores em pílula */
+.chip{border:0; background:var(--surface-2); color:var(--ink); transition:background-color .2s, transform .12s}
+.chip:active{transform:scale(.97)}
+.chip[aria-pressed="true"]{background:var(--ink); color:var(--bg)}
+.seg{border-radius:999px; padding:4px}
+.seg button{border-radius:999px; transition:background-color .2s}
+.seg button[aria-pressed="true"]{box-shadow:0 1px 3px rgba(15,34,64,.14)}
+.steps{border-radius:20px}
+.step{border-radius:16px}
+.step[aria-current="step"]{box-shadow:0 1px 3px rgba(15,34,64,.14)}
+.toggle{border:0; border-radius:999px; background:var(--surface-2); transition:background-color .2s, transform .12s}
+.toggle:active{transform:scale(.96)}
+
+/* Listas e cartões: sem borda, com sombra suave e separador recuado */
+.list{border:0; border-radius:var(--r-card); box-shadow:var(--sh-1)}
+.item, .pres{border-top:0; position:relative}
+.item + .item::before, .pres + .pres::before{content:""; position:absolute; top:0; left:16px; right:16px; height:1px; background:var(--line); pointer-events:none}
+.item{transition:background-color .15s}
+.item:active{background:var(--surface-2)}
+.ab-card{border:0; border-radius:var(--r-card); box-shadow:var(--sh-1)}
+.ab-mini{border:0; border-radius:20px; box-shadow:var(--sh-1)}
+.empty{border:0; background:var(--surface); border-radius:var(--r-card); box-shadow:var(--sh-1)}
+.banner{border-radius:16px}
+.board{border-radius:26px; background:radial-gradient(120% 90% at 100% 0%, #24477F 0%, #13294D 46%, #0B1A33 100%); box-shadow:0 18px 40px -18px rgba(11,26,51,.6)}
+.board::before{opacity:.5}
+
+/* Campos: fundo claro e contorno suave, foco bem visível */
+.input{border:0; border-radius:14px; box-shadow:inset 0 0 0 1px var(--line-strong)}
+.input:focus{outline:0; box-shadow:inset 0 0 0 2px var(--focus)}
+.search-box .input{border-radius:999px; background:var(--surface-2); box-shadow:none}
+.search-box .input:focus{box-shadow:inset 0 0 0 2px var(--focus)}
+
+/* Folhas: cantos maiores e entrada com mola */
+.sheet{border-radius:28px 28px 0 0}
+.sheet-bg{animation:mFade .2s ease}
+.sheet{animation:mUp .32s cubic-bezier(.2,.9,.25,1)}
+@keyframes mFade{from{opacity:0}to{opacity:1}}
+@keyframes mUp{from{transform:translateY(28px); opacity:.6}to{transform:none; opacity:1}}
+
+/* Cartas: metal com degradê e um brilho, e sombra de objeto */
+.t-bronze{--c-grad:linear-gradient(150deg,#F3CDA6 0%,#D0945F 36%,#A3683C 64%,#E9B88B 100%)}
+.t-prata{--c-grad:linear-gradient(150deg,#FFFFFF 0%,#D6DDE5 36%,#A5B1BE 64%,#EDF1F5 100%)}
+.t-ouro{--c-grad:linear-gradient(150deg,#FFF1B8 0%,#F2C94C 36%,#C9951B 64%,#F7DE8A 100%)}
+.t-elite{--c-grad:linear-gradient(150deg,#7EA1FF 0%,#2D5BD8 40%,#1B3C9E 70%,#5784EE 100%)}
+.t-lenda{--c-grad:linear-gradient(150deg,#2A3E68 0%,#101B33 45%,#070E1E 75%,#1F3158 100%)}
+.t-destaque{--c-grad:linear-gradient(150deg,#FFB48D 0%,#F06B2E 40%,#C2451A 70%,#F99D6E 100%)}
+.card{background:linear-gradient(115deg, transparent 36%, rgba(255,255,255,.32) 47%, transparent 58%), var(--c-grad, var(--c-bg))}
+.card-btn, .card-zoom{filter:drop-shadow(0 8px 12px rgba(15,34,64,.18)); transition:transform .15s ease}
+.card-btn:active{transform:scale(.97)}
+
+
+/* Polimento v1: o resto das peças com contorno */
+.team, .tbl-wrap, .tour-set, .sug, .action-list, .pay-card, .pay-sum{border:0; border-radius:20px; box-shadow:var(--sh-1)}
+.pill-done, .paid, .join-btn, .star, .role-pill, .ptag, .nt-n, .stb, .nudge, .pos-grid button, .sp{border:0; background:var(--surface-2)}
+.pst-dash{border:0; background:var(--surface-2)}
+.score, .set select{border:0; box-shadow:inset 0 0 0 1px var(--line-strong)}
+.score:focus, .set select:focus{outline:0; box-shadow:inset 0 0 0 2px var(--focus)}
+.paid, .join-btn, .pos-grid button, .nt-n, .stb, .nudge{transition:background-color .2s, transform .12s}
+.paid:active, .join-btn:active, .pos-grid button:active, .nt-n:active, .stb:active, .nudge:active{transform:scale(.96)}
+@media (prefers-reduced-motion:reduce){
+  .sheet, .sheet-bg{animation:none}
+  .btn, .chip, .toggle, .card-btn, .item{transition:none}
+  .btn:active, .chip:active, .toggle:active, .card-btn:active{transform:none}
+}
 /* Faixa atrás do relógio e da bateria quando abre pela Tela de Início */
 html::after{content:""; position:fixed; left:0; right:0; top:0; height:env(safe-area-inset-top,0px); background:#10294A; z-index:1000; pointer-events:none}
 </style>
