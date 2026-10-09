@@ -604,6 +604,15 @@ input[type=date].input::-webkit-datetime-edit,input[type=time].input::-webkit-da
 .fab{position:fixed; z-index:25; right:max(20px, calc(50% - 260px)); bottom:calc(98px + env(safe-area-inset-bottom,0px)); width:58px; height:58px; border-radius:20px; background:var(--ball); color:var(--ball-ink); display:grid; place-items:center; box-shadow:0 12px 26px -10px rgba(150,110,0,.75); transition:transform .12s}
 .fab svg{width:26px; height:26px}
 .fab:active{transform:scale(.94)}
+
+/* ================= Polimento v3: regras explicadas ================= */
+.pq-btn{width:100%; text-align:left; font:inherit; color:inherit}
+.pq-btn .item-title, .pq-btn .item-sub{display:block}
+.pq-head{display:flex; align-items:center; gap:12px; margin:-4px 0 12px}
+.pq-row{display:flex; align-items:center; gap:12px; padding:10px 14px; min-height:56px; position:relative}
+.pq-row + .pq-row::before{content:""; position:absolute; top:0; left:16px; right:16px; height:1px; background:var(--line)}
+.pq-v{font-family:var(--display); font-weight:800; font-size:20px; font-variant-numeric:tabular-nums; flex:none}
+.pq-v.up{color:#16884A} .pq-v.down{color:#C2410C}
 @media (prefers-reduced-motion:reduce){
   .sheet, .sheet-bg{animation:none}
   .btn, .chip, .toggle, .card-btn, .item{transition:none}
@@ -789,6 +798,7 @@ function computeResult(game, playersById, opts = {}) {
     const atBefore = { ...p.at };
     const atAfter = { ...p.at };
     const why = {};
+    const tecBefore = tecnica(p);
     if (sets > 0) {
       for (const attr of track) {
         if (!eligible(attr, p, c)) continue;
@@ -801,14 +811,16 @@ function computeResult(game, playersById, opts = {}) {
     }
     let gal = null;
     const gl = galera[pid] || [];
+    const tecSumula = tecnica({ ...p, at: atAfter });
     const g10 = galeraFechada(game) ? game.galera.notas[pid] : null;
+    const temG10 = galeraFechada(game) && Object.keys(game.galera.notas).length > 0;
     if (g10 && Number(g10.n) >= 1 && Number.isFinite(Number(g10.m))) {
       const m = clamp(Number(g10.m), 0, 10), media = Number.isFinite(Number(game.galera.media)) ? Number(game.galera.media) : 5;
-      const target = groupTech + (m - media) * GALERA10.step;
-      const now = tecnica({ ...p, at: atAfter });
-      const d = clamp(GALERA10.rate * (calib[pid] || 1) * (target - now), -GALERA10.max, GALERA10.max);
+      const d0 = GALERA10.k * (m - media) * (calib[pid] || 1);
+      const damp = d0 > 0 ? Math.min(1, (99 - tecSumula) / 20) : Math.min(1, (tecSumula - 40) / 20);
+      const d = clamp(d0 * Math.max(0, damp), -GALERA10.max, GALERA10.max);
       for (const a of ATTRS) atAfter[a] = r1(clamp(atAfter[a] + d, 40, 99));
-      gal = { avg: r1(m), n: Number(g10.n), d: r1(d), escala: 10 };
+      gal = { avg: r1(m), n: Number(g10.n), d: r1(d), escala: 10, media: r1(media) };
     } else if (sets > 0 && gl.length >= GALERA.min) {
       // Puxa a técnica para perto do que a galera viu: 3 é a média do grupo, cada estrela vale alguns pontos.
       const avg = gl.reduce((a, b) => a + b, 0) / gl.length;
@@ -819,8 +831,21 @@ function computeResult(game, playersById, opts = {}) {
       gal = { avg: r1(avg), n: gl.length, d: r1(d) };
     }
     const formaBefore = typeof p.forma === 'number' ? p.forma : tecnica(p);
-    const formaAfter = r1(clamp(formaBefore + formaD[pid], 40, 99));
+    const tecGalera = tecnica({ ...p, at: atAfter });
+    let formaAfter = r1(clamp(formaBefore + formaD[pid] * (temG10 ? GALERA10.placar : 1), 40, 99));
+    // Quanto veio de cada parte, no número geral (0,7 técnica + 0,3 forma).
+    let parts = { placar: 0.3 * (formaAfter - formaBefore), galera: 0.7 * (tecGalera - tecSumula), sumula: 0.7 * (tecSumula - tecBefore) };
+    const total = parts.placar + parts.galera + parts.sumula;
+    let limite = false;
+    if (Math.abs(total) > LIMITE_JOGO) {
+      const k = LIMITE_JOGO / Math.abs(total);
+      for (const a of ATTRS) atAfter[a] = r1(clamp(atBefore[a] + k * (atAfter[a] - atBefore[a]), 40, 99));
+      formaAfter = r1(clamp(formaBefore + k * (formaAfter - formaBefore), 40, 99));
+      parts = { placar: parts.placar * k, galera: parts.galera * k, sumula: parts.sumula * k };
+      limite = true;
+    }
     const after = { ...p, at: atAfter, forma: formaAfter };
+    const parte = { placar: r1(parts.placar), galera: r1(parts.galera), sumula: r1(parts.sumula), limite, calib: (calib[pid] || 1) > 1 };
     let nota = null;
     if (sets > 0) {
       let sum = 0;
@@ -832,7 +857,7 @@ function computeResult(game, playersById, opts = {}) {
     out[pid] = {
       team: teamOf[pid], sets, won: sw[pid], counts: c, why, nota, galera: gal,
       ovrBefore: pre[pid], ovrAfter: ovrOf(after), rawDelta: r1(ovrRaw(after) - ovrRaw(p)),
-      atBefore, atAfter, formaBefore: r1(formaBefore), formaAfter
+      atBefore, atAfter, formaBefore: r1(formaBefore), formaAfter, parte
     };
   }
   // Prêmios
@@ -967,7 +992,11 @@ function balanceTeams(list, T, rnd = Math.random) {
 const CALIB = [2.0, 1.8, 1.6, 1.4, 1.2];
 const GALERA = { min: 2, step: 6, rate: 0.12, max: 3 };
 // Notas de 0 a 10 publicadas por um admin: a carta anda pela diferença para a média do jogo.
-const GALERA10 = { step: 3, rate: 0.12, max: 3 };
+// Nota da galera (0 a 10) com direção: acima da média do jogo só sobe, abaixo só desce.
+// k = pontos de técnica por ponto de nota acima ou abaixo da média. O placar pesa metade quando há notas.
+const GALERA10 = { k: 0.6, max: 3, placar: 0.5 };
+// A carta muda no máximo isto por jogo (no número geral).
+const LIMITE_JOGO = 2;
 function galeraFechada(g) { return !!(g && g.galera && g.galera.fechado && g.galera.notas && typeof g.galera.notas === 'object' && g.teams && g.teams.length >= 2); }
 const calibOf = n => n < CALIB.length ? CALIB[n] : 1;
 const pad2 = n => String(n).padStart(2, '0');
@@ -1022,7 +1051,7 @@ function replay(players, games) {
   return { cards, results };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { GALERA, GALERA10, galeraFechada, replay, hasResult, validSet, calibOf, CALIB, localKey, ovrRaw, ATTRS, ATTR, POS, EVENTS, EVENT_KEYS, TIERS, starsToAttr, tecnica, ovrOf, tierOf, expectedNet, statDelta, setFormaDelta, computeResult, balanceTeams, costOf, teamSizes, emptyTot, countsFromLog, clamp, r1 };
+if (typeof module !== 'undefined' && module.exports) module.exports = { GALERA, GALERA10, LIMITE_JOGO, galeraFechada, replay, hasResult, validSet, calibOf, CALIB, localKey, ovrRaw, ATTRS, ATTR, POS, EVENTS, EVENT_KEYS, TIERS, starsToAttr, tecnica, ovrOf, tierOf, expectedNet, statDelta, setFormaDelta, computeResult, balanceTeams, costOf, teamSizes, emptyTot, countsFromLog, clamp, r1 };
 
 // ================= App =================
 const $ = (s, r = document) => r.querySelector(s);
@@ -1093,7 +1122,7 @@ const S = {
   ui: { notasPrompted: {}, tab: 'jogos', gameId: null, step: null, selP: null, swapSel: null, sort: 'ovr', rankSort: 'ovr', openRep: null, flash: '', sheet: null, form: null, pendingRender: false },
   migrateOffer: false,
   me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false,
-  rawPersonal: new Set(), notasDocs: {}, notasMine: {}, partidas: {}, pagos: {}, abertos: {}, pedidosOrg: {}, pedidosMeus: {}, myPedidosIdx: {}, geo: null, friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
+  rawPersonal: new Set(), contests: {}, notasDocs: {}, notasMine: {}, partidas: {}, pagos: {}, abertos: {}, pedidosOrg: {}, pedidosMeus: {}, myPedidosIdx: {}, geo: null, friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
 };
 const FBM = () => !!window.MANCHETE_FIREBASE;
 const FB = () => FBM() && S.mode === 'cloud' && !!S.me && !!S.turmaId;
@@ -1186,7 +1215,8 @@ function cleanGame(id, d) {
     repeat: d.repeat === true,
     aberto: cleanAbertoCfg(d.aberto),
     galera: cleanGaleraPub(d.galera),
-    placarRapido: d.placarRapido === true
+    placarRapido: d.placarRapido === true,
+    contest: cleanContest(d.contest)
   };
   const idxMap = o => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && v >= 0 && v <= 60) r[k] = Math.round(v); return r; };
   g.join = idxMap(d.join); g.leave = idxMap(d.leave);
@@ -1206,12 +1236,17 @@ function confirmers(g) {
   const rev = g.resultRev || 0, acc = accountIds(g), ct = teamOfId(g, g.createdBy);
   return Object.entries(g.confirms || {}).filter(([u, r]) => r === rev && u !== g.createdBy && acc.includes(u) && (ct < 0 || teamOfId(g, u) !== ct)).map(([u]) => u);
 }
+// O placar vale na hora. Se alguém que jogou contestar, um admin marca o jogo como contestado e ele para de contar até ser revisto.
+// Jogo marcado por quem não é admin precisa de pelo menos 4 pessoas com conta nos times (proteção contra jogo inventado).
+const contestado = g => !!(g && g.contest && g.contest.st === 'aberto' && g.contest.rev === (g.resultRev || 0));
 function gameCounts(g) {
-  if (!hasResult(g)) return !!(g && g.galera && g.galera.fechado && g.teams && g.teams.length >= 2);
+  if (!hasResult(g)) return !!(g && g.galera && g.galera.fechado && g.teams && g.teams.length >= 2 && !contestado(g));
+  if (contestado(g)) return false;
   if (!needsConfirm(g)) return true;
-  return accountIds(g).length >= 4 && confirmers(g).length > 0;
+  return accountIds(g).length >= 4;
 }
 function canConfirm(g) {
+  return false;
   if (!FB() || !hasResult(g) || !needsConfirm(g) || gameCounts(g)) return false;
   const me = meId(), ct = teamOfId(g, g.createdBy);
   return me !== g.createdBy && accountIds(g).includes(me) && (ct < 0 || teamOfId(g, me) !== ct) && (g.confirms || {})[me] !== (g.resultRev || 0);
@@ -1434,7 +1469,7 @@ function subscribe() {
         if (FB() && !S.players[meId()]) setTimeout(() => { if (FB() && !S.players[meId()] && !S.ui.sheet) ACT.newSelf(); }, 60);
       }
       if (got.players && got.games && S.mode === 'cloud') upgradeData();
-      if (firm.players && firm.games) { S.firmData = true; checkMigration(); runPrivacyMigration(); syncPublicProfile(); ensureRecurring(); setTimeout(ensureNotas, 0); setTimeout(acertoQuarta, 1200); }
+      if (firm.players && firm.games) { S.firmData = true; checkMigration(); runPrivacyMigration(); syncPublicProfile(); ensureRecurring(); setTimeout(ensureNotas, 0); setTimeout(ensureContests, 0); setTimeout(acertoQuarta, 1200); }
       syncSocial();
       if (S.mode === 'cloud') render();
     }, err => {
@@ -1514,7 +1549,7 @@ function stopListening() {
   for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } }
   for (const m of [S.social.profiles, S.social.rosters]) { for (const off of m.values()) { try { off(); } catch (e) { } } m.clear(); }
 }
-function resetData() { S.notasDocs = {}; S.notasMine = {}; S.ui.notasPrompted = {}; stopAbertos(); S.abertos = {}; S.pedidosOrg = {}; S.pedidosMeus = {}; S.ui.abertoId = null; S.partidasOn = false; S.partidas = {}; S.pagos = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
+function resetData() { S.contests = {}; S.notasDocs = {}; S.notasMine = {}; S.ui.notasPrompted = {}; stopAbertos(); S.abertos = {}; S.pedidosOrg = {}; S.pedidosMeus = {}; S.ui.abertoId = null; S.partidasOn = false; S.partidas = {}; S.pagos = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
 function bootFirebase() {
   S.mode = 'auth-wait'; S.invite = readInvite(); render();
   const go = () => { if (S.authOff) return; S.authOff = window.MCloud.onAuth(u => onAuthChange(u)); };
@@ -1742,6 +1777,7 @@ function notifData() {
     if (g.createdBy !== me && g.status !== 'encerrado' && g.date >= today && g.created) news.push({ kind: g.vis === 'privada' && g.allowed.includes(me) ? 'invite' : 'game', g, uid: g.createdBy, t: g.created });
     if (galeraMvp(g).includes(me)) news.push({ kind: 'mvp', g, t: new Date(voteCloseDate(g) + 'T23:00').getTime() });
   }
+  if (FBM()) for (const g of Object.values(S.games)) if (contestado(g) && canEditGame(g)) act.push({ kind: 'contest', g, t: (g.contest && g.contest.at) || 0 });
   if (FBM()) for (const g of Object.values(S.games)) if (notasEstado(g) === 'aberta' && votantes(g).includes(me) && !notasDone(g, me)) act.push({ kind: 'notas', g, t: notasAbre(g) });
   if (FBM()) {
     for (const [gid, m] of Object.entries(S.pedidosOrg)) for (const pe of Object.values(m || {})) if (pe.status === 'pendente' && S.games[gid]) act.push({ kind: 'pedido', g: S.games[gid], pe, t: pe.at || 0 });
@@ -1768,6 +1804,7 @@ function renderNotifBadge() { if (FB()) renderTop(); }
 // Nome para as notificações: nunca "Jogador removido" para quem acabou de entrar.
 function personName(u) { const p = P(u); if (p && p.known !== false && p.name && p.name !== 'Jogador') return p.nick || p.name; const pi = personalOf(u); return pi && pi.name ? (pi.nick || pi.name) : ''; }
 function todoRow(a) {
+  if (a.kind === 'contest') return `<div class="pres"><div class="item-main"><div class="item-title">Placar contestado</div><div class="item-sub">Jogo de ${esc(fmtDay(a.g.date).toLowerCase())}. Revise para voltar a contar</div></div><button class="btn btn-sm btn-ball" data-act="openGame" data-id="${esc(a.g.id)}">Ver</button></div>`;
   if (a.kind === 'notas') return `<div class="pres"><div class="item-main"><div class="item-title">Dar nota pra galera</div><div class="item-sub">Jogo de ${esc(fmtDay(a.g.date).toLowerCase())}. Até ${esc(fmtFecha(notasFecha(a.g)))}</div></div><button class="btn btn-sm btn-ball" data-act="notasAbrir" data-gid="${esc(a.g.id)}">Dar notas</button></div>`;
   if (a.kind === 'pedido') return `<div class="pres"><div class="item-main"><div class="item-title">${esc(a.pe.nick || a.pe.name || 'Alguém')} pediu vaga</div><div class="item-sub">Jogo de ${esc(fmtDay(a.g.date).toLowerCase())}, ${esc(fmtTime(a.g.time))}</div></div><button class="btn btn-sm btn-ball" data-act="openGame" data-id="${esc(a.g.id)}">Ver</button></div>`;
   if (a.kind === 'conviteTurma') return `<div class="pres"><div class="item-main"><div class="item-title">Chamaram você para a turma ${esc(a.pe.convite.n || '')}</div><div class="item-sub">Depois do jogo aberto</div></div><button class="btn btn-sm btn-ball" data-act="abEntrarTurma" data-id="${esc(a.gid)}">Entrar</button></div>`;
@@ -2049,7 +2086,45 @@ function rankingView() {
 }
 
 // ---------- Jogo ----------
+function cleanContest(c) {
+  if (!c || typeof c !== 'object' || !['aberto', 'mantido'].includes(c.st)) return null;
+  return { st: c.st, rev: Math.max(0, Math.round(Number(c.rev) || 0)), at: Number(c.at) || 0, n: Math.max(0, Math.round(Number(c.n) || 0)), by: typeof c.by === 'string' ? c.by : '' };
+}
+const contestFim = g => (g.finishedAt || startTs(g) + 3 * 3600e3) + 24 * 3600e3;
+const contestDoc = (g, u) => S.contests[`ct_${g.id}_${u}`];
+const meuContest = g => { const c = contestDoc(g, meId()); return c && c.rev === (g.resultRev || 0) ? c : null; };
+function podeContestar(g) { return FBM() && hasResult(g) && teamIds(g).includes(meId()) && !canEditGame(g) && Date.now() < contestFim(g) && !meuContest(g) && !(g.contest && g.contest.st === 'mantido' && g.contest.rev === (g.resultRev || 0)); }
+function contestsDe(g) { return Object.values(S.contests).filter(c => c.gid === g.id && c.rev === (g.resultRev || 0)); }
+function contestLinkHTML(g) {
+  if (!FBM() || !hasResult(g)) return '';
+  if (meuContest(g)) return `<p class="sub small" style="margin-top:10px">Você contestou este placar. Os admins vão revisar.</p>`;
+  if (podeContestar(g)) return `<p style="margin-top:10px"><button class="link-btn quiet" data-act="contestar" data-id="${esc(g.id)}">Placar errado? Contestar</button></p>`;
+  return '';
+}
+// O app de um admin marca o jogo como contestado quando chega uma contestação do placar atual.
+const CT_RUN = new Set();
+function ensureContests() {
+  if (!FBM() || !isTurmaAdmin() || !S.firmData) return;
+  for (const g of Object.values(S.games)) {
+    const cs = contestsDe(g); if (!cs.length) continue;
+    const rev = g.resultRev || 0;
+    if (g.contest && g.contest.rev === rev) continue;
+    const key = g.id + ':' + rev; if (CT_RUN.has(key)) continue; CT_RUN.add(key);
+    g.contest = { st: 'aberto', rev, at: Date.now(), n: cs.length, by: '' }; persist('games', g.id); dirty(); render();
+  }
+}
 function confirmBox(g) {
+  if (FB() && hasResult(g) && contestado(g)) {
+    if (canEditGame(g)) {
+      const cs = contestsDe(g);
+      return `<div class="banner" style="flex-direction:column;align-items:stretch;gap:10px"><b>Placar contestado</b>${cs.map(c => `<span class="sub small">${esc(nameOf(c.createdBy))}: ${esc(c.motivo || 'sem motivo escrito')}</span>`).join('') || '<span class="sub small">Alguém que jogou contestou.</span>'}<span class="sub small">Até você revisar, a partida não conta nas cartas.</span><div class="row" style="gap:8px"><button class="btn btn-sm" style="flex:1" data-act="contestManter" data-id="${esc(g.id)}">Manter o placar</button><button class="btn btn-sm btn-ball" style="flex:1" data-act="corrigirFinal">Corrigir</button></div></div>`;
+    }
+    return `<div class="banner">Placar contestado. Até um admin revisar, a partida não conta nas cartas.</div>`;
+  }
+  if (FB() && hasResult(g) && needsConfirm(g) && accountIds(g).length < 4) return `<div class="banner">Esta partida não entra nas cartas: precisa de pelo menos 4 jogadores com conta nos times.</div>`;
+  return '';
+}
+function confirmBoxAntigo(g) {
   if (!pendingConfirm(g) && !(FB() && needsConfirm(g) && gameCounts(g))) return '';
   if (gameCounts(g)) { const who = confirmers(g).map(nameOf).join(', '); return `<div class="banner">Placar confirmado por ${esc(who)}. Os pontos já estão nas cartas.</div>`; }
   if (accountIds(g).length < 4) return `<div class="banner" style="border:1px solid var(--zone);background:transparent">Esta partida não entra nas cartas: precisa de pelo menos 4 jogadores com conta nos times.</div>`;
@@ -2200,11 +2275,12 @@ function placarStep(g) {
       <div class="set-side m-pa"><span class="team-dot" style="background:${TEAMS[s.a].c}"></span>${inp('pa', s.pa, TEAMS[s.a].name)}</div><div class="set-side m-pb"><span class="team-dot" style="background:${TEAMS[s.b].c}"></span>${inp('pb', s.pb, TEAMS[s.b].name)}</div>
     </div>`;
   }).join('');
-  let h = `<p class="sub" style="margin:12px 0">${FB() && needsConfirm(g) ? 'Como você não é admin da turma, o placar entra nas cartas quando alguém de outro time confirmar. Corrigir um número depois pede uma nova confirmação.' : 'Os pontos entram nas cartas assim que você anota o placar. Errou um número? É só corrigir que as cartas se ajustam sozinhas.'}</p>`;
+  let h = `<p class="sub" style="margin:12px 0">${FB() && needsConfirm(g) ? (accountIds(g).length < 4 ? 'Como você não é admin da turma, a partida só entra nas cartas com pelo menos 4 jogadores com conta nos times.' : 'Os pontos entram nas cartas assim que você anota o placar. Quem jogou tem 24 horas para contestar, e aí um admin revisa.') : 'Os pontos entram nas cartas assim que você anota o placar. Errou um número? É só corrigir que as cartas se ajustam sozinhas.'}</p>`;
   h += g.sets.length ? listBox([rows]) : `<div class="empty"><p class="sub" style="margin:0">Nenhum set ainda.</p></div>`;
   if (W) h += `<div style="margin-top:10px"><button class="btn btn-block" data-act="addSet">${ICON.plus}Adicionar set</button></div>`;
   h += `<div class="total" id="setTotal">${esc(scoreline(g) || '')}</div>`;
   if (W) h += `<div style="margin-top:8px"><button class="btn btn-block btn-ball" data-act="preview">Ver relatório e encerrar</button></div>`;
+  h += contestLinkHTML(g);
   h += notasHTML(g);
   h += whoPlayedHTML(g);
   return h;
@@ -2291,6 +2367,7 @@ function finalView(g) {
   h += `<div class="board" style="padding:16px"><div class="board-label">Resultado</div><div class="board-day" style="font-size:30px;margin-top:4px">${esc(scoreline(g) || 'Sem placar')}</div>
     <div class="board-place" style="margin:6px 0 0">${g.placarRapido ? '' : g.sets.filter(s => s.pa != null && s.pb != null).map(s => `${s.pa}–${s.pb}`).join(', ')}</div></div>`;
   if (pend) h += `<p class="sub small" style="margin-top:12px">Prévia: é assim que as cartas vão ficar quando o placar valer.</p>`;
+  h += contestLinkHTML(g);
   h += notasHTML(g);
   h += whoPlayedHTML(g);
   h += reportBody(rows, res.mvp, res.awards, 'final');
@@ -2312,6 +2389,8 @@ function renderSheet() {
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = 'Você e a turma'; body = perfilHTML(); }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
+  else if (s.type === 'porque') { const g = S.games[s.gid], p = P(s.pid); if (!g || !p) return closeSheet(); title = 'Por que a carta mudou'; body = porqueHTML(g, s.pid); }
+  else if (s.type === 'contestar') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Contestar o placar'; body = `<p class="sub" style="margin:-4px 0 12px">Placar registrado: <b>${esc(scoreline(g) || '')}</b>. Os admins recebem a contestação, e até alguém revisar a partida não conta nas cartas.</p><label class="field"><span>O que está errado?</span><textarea class="input" id="ctMotivo" rows="3" maxlength="200" placeholder="Ex.: o azul ganhou o segundo set" style="padding:12px 14px;min-height:90px"></textarea></label><div id="fErr" class="err" role="alert"></div><button class="btn btn-block btn-ball" style="margin-top:8px" data-act="contestEnviar">Enviar para os admins</button>`; }
   else if (s.type === 'acertoOk') { const g = S.games[s.gid]; if (!g || !g.teams) return closeSheet(); title = 'Jogo de quarta acertado'; body = acertoOkHTML(g); }
   else if (s.type === 'acerto') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Acertar o jogo de quarta'; body = acertoEscolhaHTML(g, s); }
   else if (s.type === 'notasPrompt') { const g = S.games[s.gid]; if (!g) return closeSheet(); title = 'Jogo encerrado!'; body = `<div style="text-align:center;display:grid;gap:12px"><div class="nt-ball">${CHECK_SVG}</div><div style="font-weight:700;font-size:19px">Vamos dar nota pra galera?</div><p class="sub" style="margin:0">${plural(rateesFor(g, meId()).length, 'pessoa jogou', 'pessoas jogaram')} com você. Leva menos de um minuto, e ninguém vê quem deu qual nota.</p><button class="btn btn-block btn-ball" data-act="notasAbrir" data-gid="${esc(g.id)}">Dar as notas</button><button class="btn btn-block" data-act="closeSheet">Agora não</button><p class="sub small" style="margin:0">A votação fica aberta até ${esc(fmtFecha(notasFecha(g)))}.</p></div>`; }
@@ -2415,8 +2494,7 @@ async function createElsewhere(el, where) {
   const date = $('#fDate').value, time = $('#fTime').value || '20:00';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { $('#fErr').textContent = 'Escolha o dia do jogo.'; return; }
   const max = clamp(parseInt($('#fMax').value, 10) || 0, 0, 60), place = $('#fPlace').value.trim().slice(0, 80), note = $('#fNote').value.trim().slice(0, 300);
-  const visBtn = document.querySelector('[data-act="gVis"][aria-pressed="true"]');
-  let vis = visBtn ? visBtn.dataset.v : 'amigos';
+  let vis = lerVis().vis || 'amigos';
   if (!where.length && vis === 'turma') vis = 'amigos';
   el.disabled = true;
   try {
@@ -2457,18 +2535,33 @@ function whereField() {
 function syncWhere() {
   const sel = [...document.querySelectorAll('[data-act="gWhere"][aria-pressed="true"]')];
   const hint = $('#gWhereHint'), turmaBtn = document.querySelector('[data-act="gVis"][data-v="turma"]');
-  if (hint) { hint.hidden = sel.length === 1; hint.textContent = !sel.length ? 'Sem turma: vira amistoso, não mexe nas cartas. Escolha Só amigos ou Só convidados.' : 'Entre turmas: vira amistoso, não mexe nas cartas.'; }
+  if (hint) { hint.hidden = sel.length === 1; hint.textContent = !sel.length ? 'Sem turma: vira amistoso, não mexe nas cartas. Chame seus amigos ou escolha as pessoas.' : 'Entre turmas: vira amistoso, não mexe nas cartas.'; }
   if (turmaBtn) {
     turmaBtn.hidden = !sel.length; turmaBtn.textContent = sel.length > 1 ? 'Todas as turmas' : 'Toda a turma';
     const grp = turmaBtn.parentElement; if (grp) grp.style.gridTemplateColumns = sel.length ? '1fr 1fr 1fr' : '1fr 1fr';
-    if (!sel.length && turmaBtn.getAttribute('aria-pressed') === 'true') { const a = document.querySelector('[data-act="gVis"][data-v="amigos"]'); if (a) ACT.gVis(a); }
+    const ab = document.querySelector('[data-act="gVisAberto"]'); if (ab) ab.hidden = sel.length !== 1;
+    if (grp) grp.style.gridTemplateColumns = sel.length === 1 ? '1fr 1fr 1fr' : sel.length ? '1fr 1fr' : '1fr';
+    if (!sel.length && (turmaBtn.getAttribute('aria-pressed') === 'true' || (ab && ab.getAttribute('aria-pressed') === 'true'))) { const a = document.querySelector('[data-act="gVis"][data-v="amigos"]'); if (a) ACT.gVis(a); }
+    else if (sel.length > 1 && ab && ab.getAttribute('aria-pressed') === 'true') ACT.gVis(turmaBtn);
   }
 }
+const VIS_HINT = {
+  turma: 'Toda a turma vê e confirma presença.',
+  privada: 'Só quem você chamar vê o jogo. Depois de criar, toque em Convidar e escolha.',
+  amigos: 'Seus amigos veem e confirmam presença.',
+  aberto: 'A turma vê, e logo depois de criar você escolhe quantas vagas abrir para quem é de fora.'
+};
 function visField(g) {
-  const vis = g ? g.vis : 'turma';
-  return `<div class="field"><span>Quem vê a partida</span>
-    <div class="seg seg-full" style="grid-template-columns:1fr 1fr 1fr" role="group" aria-label="Quem vê a partida"><button data-act="gVis" data-v="turma" aria-pressed="${vis === 'turma'}">Toda a turma</button><button data-act="gVis" data-v="amigos" aria-pressed="${vis === 'amigos'}">Só amigos</button><button data-act="gVis" data-v="privada" aria-pressed="${vis === 'privada'}">Só convidados</button></div>
-    <p class="sub small" id="gVisHint" style="margin-top:8px" ${vis === 'privada' ? '' : 'hidden'}>${g ? 'Quem vê você escolhe dentro da partida, em Convidar.' : 'Depois de criar, abra a partida e toque em Convidar para escolher quem vê.'}</p></div>`;
+  const vis = g ? g.vis : 'turma', conv = vis === 'amigos' || vis === 'privada';
+  return `<div class="field"><span>Quem vê o jogo</span>
+    <div class="seg seg-full" id="gVisMain" style="grid-template-columns:1fr 1fr 1fr" role="group" aria-label="Quem vê o jogo"><button data-act="gVis" data-v="turma" aria-pressed="${vis === 'turma'}">Toda a turma</button><button data-act="gVisConv" aria-pressed="${conv}">Convidados</button>${g ? '' : '<button data-act="gVisAberto" aria-pressed="false">Aberto</button>'}</div>
+    <div id="gConv" style="margin-top:8px" ${conv ? '' : 'hidden'}><div class="seg seg-full" style="grid-template-columns:1fr 1fr" role="group" aria-label="Quais convidados"><button data-act="gVis" data-v="privada" aria-pressed="${vis === 'privada'}">Escolher pessoas</button><button data-act="gVis" data-v="amigos" aria-pressed="${vis === 'amigos'}">Meus amigos</button></div></div>
+    <p class="sub small" id="gVisHint" style="margin-top:8px">${esc(VIS_HINT[vis] || VIS_HINT.turma)}</p></div>`;
+}
+function lerVis() {
+  if (document.querySelector('[data-act="gVisAberto"][aria-pressed="true"]')) return { vis: 'turma', aberto: true };
+  const b = document.querySelector('[data-act="gVis"][aria-pressed="true"]');
+  return { vis: b ? b.dataset.v : 'turma', aberto: false };
 }
 function nextDateLike(last) {
   const t = todayStr();
@@ -2690,14 +2783,15 @@ function playerHTML(p) {
     h += `<div style="display:grid;gap:8px;margin:4px 0 14px">${st === 'friend' ? `<p class="sub" style="text-align:center;margin:0">Vocês são amigos${n ? `, jogaram ${n === 1 ? '1 vez' : n + ' vezes'} juntos` : ''}.</p><button class="btn btn-block btn-ghost" data-act="askUnfriend" data-uid="${esc(p.id)}">Desfazer amizade</button>` : `${friendBtn(p.id, true)}${st === 'received' ? `<button class="btn btn-block btn-ghost" data-act="friendCancel" data-uid="${esc(p.id)}">Recusar</button>` : ''}${n ? `<p class="sub small" style="text-align:center;margin:0">Vocês jogaram ${n === 1 ? '1 vez' : n + ' vezes'} juntos.</p>` : ''}`}</div>`;
   }
   const extra = [p.height ? `${fmtN(p.height / 100, 2)} m` : '', ageOf(p) ? `${ageOf(p)} anos` : ''].filter(Boolean).join(', ');
-  h += `<p class="sub" style="text-align:center">${esc(posLabel(p))}${extra ? `, ${extra}` : ''}. Técnica ${fmtN(tecnica(p))}, forma ${fmtN(p.forma)}.</p>`;
+  h += `<p class="sub" style="text-align:center">${esc(posLabel(p))}${extra ? `, ${extra}` : ''} · ${esc(tierOf(ovrOf(p)).name)} ${ovrOf(p)}</p>`;
+  if (p.last && p.last.g && S.games[p.last.g] && resultOf(S.games[p.last.g])) h += `<p style="text-align:center;margin:-2px 0 8px"><button class="link-btn" data-act="porque" data-gid="${esc(p.last.g)}" data-pid="${esc(p.id)}">Por que ${p.last.d > 0 ? 'subiu' : p.last.d < 0 ? 'caiu' : 'mudou'} no último jogo?</button></p>`;
   if (FB()) {
     const tag = p.id === meId() ? 'Esta é a sua carta.' : p.guest && p.visitor ? 'Visitante: veio por um jogo aberto.' : p.guest ? `Convidado, cuidado por ${esc((S.members[p.createdBy] || {}).name || 'alguém da turma')}.` : (!S.members[p.id] ? 'Saiu da turma.' : '');
     if (tag) h += `<p class="sub small" style="text-align:center">${tag}</p>`;
     const role = roleOf(p.id);
     if (role) h += `<p style="text-align:center;margin:-2px 0 8px"><span class="role-pill">${role}</span></p>`;
   }
-  if (p.calib || p.level) h += `<p class="sub small" style="text-align:center">${p.level ? `Entrou como ${LEVELS[p.level].name.toLowerCase()}. ` : ''}${p.calib ? `Em calibração: ${CALIB.length - p.n === 1 ? 'falta 1 jogo' : `faltam ${CALIB.length - p.n} jogos`} para a carta firmar, e até lá ela anda mais rápido.` : ''}</p>`;
+  if (p.calib || p.level) h += `<p class="sub small" style="text-align:center">${p.level ? `Entrou como ${LEVELS[p.level].name.toLowerCase()}. ` : ''}${p.calib ? `Carta nova: ${CALIB.length - p.n === 1 ? 'falta 1 jogo' : `faltam ${CALIB.length - p.n} jogos`} para a carta firmar, e até lá ela anda mais rápido.` : ''}</p>`;
   if (hist.length >= 2) h += section('Evolução', `<div class="list" style="padding:10px 12px">${spark(hist)}<div class="row sub small"><span>${hist[0]}</span><span class="spacer"></span><span>${plural(hist.length - 1, 'jogo', 'jogos')}</span><span class="spacer"></span><span>${hist[hist.length - 1]}</span></div></div>`);
   h += section('Na temporada', `<div class="stats">${stat(t.jogos, 'Jogos')}${stat(t.sets ? Math.round(100 * t.setsV / t.sets) + '%' : '–', 'Sets ganhos')}${stat(t.notaN ? fmtN(t.notaSum / t.notaN) : '–', 'Nota média')}${stat(t.mvp, FBM() ? 'MVPs pelos números' : 'MVPs')}${FBM() ? stat(galeraMvpCount(p.id), 'MVPs da galera') : ''}${stat(t.ace, 'Aces')}${stat(t.es, 'Erros de saque')}${stat(t.ep, 'Erros de passe')}${stat(t.ap, 'Pontos de ataque')}${stat(t.bl, 'Bloqueios')}${stat(t.df, 'Defesas')}${stat(t.ea, 'Erros de ataque')}${stat(t.el, 'Erros de toque')}</div>`);
   if (canEditPlayer(p)) h += `<div style="margin-top:16px"><button class="btn btn-block" data-act="editPlayer" data-pid="${esc(p.id)}">${p.id === meId() ? 'Editar minha carta' : 'Editar jogador'}</button></div>`;
@@ -2726,7 +2820,7 @@ function previewHTML(gid) {
   const res = resultOf(g) || (pend ? computeResult(g, D().view) : null) || { players: {}, awards: [], mvp: null };
   const bad = g.sets.map((st, i) => (st.pa == null || st.pb == null || st.pa === st.pb || st.a === st.b) ? i + 1 : 0).filter(Boolean);
   const warn = bad.length ? `<div class="banner" style="margin:0 0 10px;border:1px solid var(--zone);background:transparent">${bad.length === 1 ? `O set ${bad[0]} está incompleto ou empatado e não vai contar.` : `Os sets ${bad.join(', ')} estão incompletos ou empatados e não vão contar.`}</div>` : '';
-  return `${warn}<p class="sub">${pend ? (accountIds(g).length < 4 ? 'Esta partida não entra nas cartas: precisa de pelo menos 4 jogadores com conta. Abaixo, só uma prévia.' : 'Prévia: os pontos entram nas cartas quando alguém de outro time confirmar o placar. Encerrar só trava o jogo.') : 'As cartas já estão com esse placar. Encerrar só trava o jogo, e dá para reabrir se precisar corrigir.'}</p>
+  return `${warn}<p class="sub">${pend ? (accountIds(g).length < 4 ? 'Esta partida não entra nas cartas: precisa de pelo menos 4 jogadores com conta. Abaixo, só uma prévia.' : 'As cartas já estão com esse placar. Quem jogou tem 24 horas para contestar. Encerrar só trava o jogo.') : 'As cartas já estão com esse placar. Encerrar só trava o jogo, e dá para reabrir se precisar corrigir.'}</p>
     <div class="total" style="text-align:left;margin:4px 0 8px">${esc(scoreline(g) || '')}</div>
     ${reportBody(res.players, res.mvp, res.awards, 'preview')}
     <div style="display:grid;gap:10px;margin-top:16px">${canEditGame(g) ? '<button class="btn btn-block btn-ball" data-act="closeGame">Encerrar jogo</button>' : ''}<button class="btn btn-block btn-ghost" data-act="closeSheet">Voltar para o jogo</button></div>`;
@@ -2845,7 +2939,7 @@ function tourSlides() {
   const boardArt = `<section class="board tour-board" aria-hidden="true"><div class="board-label">Próximo jogo</div><div class="board-when"><div class="board-day" style="font-size:28px">Quarta<br>14 de out</div><div class="board-time" style="font-size:48px">20h00</div></div><div class="board-place">10 de 12 confirmados</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><span class="btn">Vou jogar</span><span class="btn board-ghost">Abrir jogo</span></div></section>`;
   const scoreArt = `<div class="tour-score" aria-hidden="true"><div class="tour-set"><span class="team-dot" style="background:${TEAMS[0].c}"></span><b>25</b><span class="sub">x</span><b>21</b><span class="team-dot" style="background:${TEAMS[1].c}"></span><span class="spacer"></span><span class="sub small">Set 1</span></div><div class="tour-set"><span class="team-dot" style="background:${TEAMS[0].c}"></span><b>25</b><span class="sub">x</span><b>18</b><span class="team-dot" style="background:${TEAMS[1].c}"></span><span class="spacer"></span><span class="sub small">Set 2</span></div><div class="tour-up"><span class="sub">Sua carta</span><span class="num" style="font-size:26px">71</span><span class="delta up">+2</span></div></div>`;
   return [
-    { art: cardArt, title: 'Esta é a sua carta', text: 'O número grande é o seu geral, que junta seus fundamentos com a sua forma nos jogos. A cor mostra o nível, de bronze a lenda. Nos 5 primeiros jogos ela se ajusta mais rápido.' },
+    { art: cardArt, title: 'Esta é a sua carta', text: 'O número grande é o seu geral. Ele sobe quando seu time ganha e quando a galera te dá nota acima da média do jogo, no máximo 2 pontos por jogo. A cor mostra o nível, de bronze a lenda.' },
     { art: boardArt, title: 'Presença em um toque', text: 'O próximo jogo aparece no topo: é só tocar em Vou jogar. Se lotar, você entra na espera e é avisado quando abrir vaga. Quem marca a partida é quem cuida dela, e você também pode marcar as suas.' },
     ...(privacyOn() ? [{ art: `<div class="tour-score" aria-hidden="true"><div class="tour-set"><span class="av">R</span><b style="font-size:18px">Rafa</b><span class="spacer"></span><span class="btn btn-sm">Adicionar</span></div><div class="tour-set"><span class="av">B</span><b style="font-size:18px">Bia</b><span class="spacer"></span><span class="pill pill-done">Amigos</span></div></div>`, title: 'Sua galera', text: 'Você entra como amigo de quem te convidou. No Elenco aparece todo mundo da turma, e quem ainda não é seu amigo tem a faixa amarela na carta para adicionar. Quem é de fora da turma não vê nada.' }] : []),
     { art: scoreArt, title: 'O placar mexe nas cartas', text: 'Quando o placar é anotado, as cartas sobem ou descem na hora. Se quem marcou não for admin da turma, alguém do outro time confirma o placar antes de valer.' }
@@ -3250,9 +3344,9 @@ function startPartidas() {
   S.partidasOn = true;
   S.unsubs.push(window.MCloud.watchPartidas(meId(), list => {
     const m = {}, pg = {};
-    const nt = {};
-    for (const x of list || []) if (x && x.id) { if (x.kind === 'pago') pg[x.id] = x; else if (x.kind === 'notas') nt[x.id] = x; else m[x.id] = cleanPartida(x.id, x); }
-    S.partidas = m; S.pagos = pg; S.notasDocs = nt; refreshPagos(); setTimeout(ensureNotas, 0);
+    const nt = {}, ct = {};
+    for (const x of list || []) if (x && x.id) { if (x.kind === 'pago') pg[x.id] = x; else if (x.kind === 'notas') nt[x.id] = x; else if (x.kind === 'contest') ct[x.id] = Object.assign({}, x, { rev: Number(x.rev) || 0 }); else m[x.id] = cleanPartida(x.id, x); }
+    S.partidas = m; S.pagos = pg; S.notasDocs = nt; S.contests = ct; refreshPagos(); setTimeout(ensureNotas, 0); setTimeout(ensureContests, 0);
     for (const p of Object.values(m)) for (const [u, x] of Object.entries(p.roster)) if (!S.publicProfiles[u]) S.publicProfiles[u] = x;
     dirty(); render(); refreshAudience();
   }, () => { S.partidasOn = false; }));
@@ -3416,6 +3510,25 @@ function acertoEscolhaHTML(g, sh) {
 // Nota por cor, como nos apps de futebol: dá para ler o desempenho de relance.
 const rtCls = v => v >= 8.5 ? 'r9' : v >= 7.5 ? 'r8' : v >= 6.5 ? 'r7' : v >= 6 ? 'r6' : 'r5';
 const CROWN_SVG = '<svg width="26" height="18" viewBox="0 0 26 18" aria-hidden="true"><path d="M2 16L4 4l6 6 3-8 3 8 6-6 2 12z" fill="currentColor"/></svg>';
+function porqueHTML(g, pid) {
+  const r = g && resultOf(g), x = r && r.players && r.players[pid], p = P(pid);
+  if (!x || !p) return '<p class="sub">Esta partida ainda não mexeu nas cartas.</p>';
+  const pt = x.parte || { placar: 0, galera: 0, sumula: 0 };
+  const val = v => `<span class="pq-v ${v >= 0.05 ? 'up' : v <= -0.05 ? 'down' : ''}">${v >= 0.05 ? '+' : v <= -0.05 ? '−' : ''}${fmtN(Math.abs(v))}</span>`;
+  const linha = (t, sub, v) => `<div class="pq-row"><div class="item-main"><div class="item-title">${t}</div>${sub ? `<div class="item-sub">${sub}</div>` : ''}</div>${val(v)}</div>`;
+  const rows = [];
+  if (x.galera) rows.push(linha('Nota da galera', `${fmtN(x.galera.avg)}${x.galera.media != null ? `, com a média do jogo em ${fmtN(x.galera.media)}` : ''}`, pt.galera));
+  if (x.sets) rows.push(linha('Resultado do time', `${x.won} de ${x.sets} sets ganhos${x.galera ? '. Com notas da galera, o placar vale metade' : ''}`, pt.placar));
+  if (Math.abs(pt.sumula || 0) >= 0.05) rows.push(linha('Lances anotados', 'Pela súmula', pt.sumula));
+  const total = (pt.placar || 0) + (pt.galera || 0) + (pt.sumula || 0);
+  let h = `<div class="pq-head">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="sub">Geral ${x.ovrBefore} → <b>${x.ovrAfter}</b></div></div>${val(total)}</div>`;
+  h += listBox(rows.length ? rows : [linha('Sem mudança', 'Nada neste jogo mexeu na carta', 0)]);
+  const notas = [];
+  if (pt.limite) notas.push(`Bateu no limite: a carta muda no máximo ${LIMITE_JOGO} pontos por jogo.`);
+  if (pt.calib) notas.push('Carta nova: nos 5 primeiros jogos ela anda mais rápido.');
+  notas.push('Nota acima da média do jogo sobe a carta, abaixo desce. Vitória sobe, derrota desce.');
+  return h + `<p class="sub small" style="margin-top:10px">${notas.join(' ')}</p>`;
+}
 function cartaTxt(dd) {
   if (dd == null) return '';
   if (dd >= 0.05) return `<span class="nt-d up">carta ↑ ${fmtN(dd)}</span>`;
@@ -3494,7 +3607,7 @@ function notasHTML(g) {
     const res = resultOf(g), delta = pid => { const x = res && res.players && res.players[pid]; return x && x.ovrBefore != null ? x.ovrAfter - x.ovrBefore : null; };
     let h = '';
     if (r.mvp && P(r.mvp) && r.notas[r.mvp]) h += `<div class="nt-mvp">${avatar(P(r.mvp))}<div class="item-main"><div class="nt-k">MVP da galera</div><div class="nt-name">${esc(P(r.mvp).nick || P(r.mvp).name)}</div><div class="nt-sub">${plural(r.notas[r.mvp].n, 'voto', 'votos')}</div></div><span class="rt ${rtCls(r.notas[r.mvp].m)}">${fmtN(r.notas[r.mvp].m)}</span></div>`;
-    if (ids.length) h += listBox(ids.map(pid => { const dd = delta(pid); const ct = cartaTxt(dd); return `<div class="pres${pid === me ? ' pres-me' : ''}">${avatar(P(pid))}<div class="item-main"><div class="item-title">${pid === me ? 'Você' : esc(P(pid).nick || P(pid).name)}</div><div class="item-sub">${ct ? ct + ' · ' : ''}${plural(r.notas[pid].n, 'voto', 'votos')}</div></div><span class="rt ${rtCls(r.notas[pid].m)}">${fmtN(r.notas[pid].m)}</span></div>`; })) + '<p class="sub small" style="margin-top:8px">A carta muda pela diferença para a média do jogo: se todo mundo der 8 para todo mundo, ninguém sobe por isso.</p>';
+    if (ids.length) h += listBox(ids.map(pid => { const dd = delta(pid); const ct = cartaTxt(dd); return `<button class="pres pq-btn${pid === me ? ' pres-me' : ''}" data-act="porque" data-gid="${esc(g.id)}" data-pid="${esc(pid)}">${avatar(P(pid))}<span class="item-main"><span class="item-title">${pid === me ? 'Você' : esc(P(pid).nick || P(pid).name)}</span><span class="item-sub">${ct ? ct + ' · ' : ''}${plural(r.notas[pid].n, 'voto', 'votos')}</span></span><span class="rt ${rtCls(r.notas[pid].m)}">${fmtN(r.notas[pid].m)}</span></button>`; })) + '<p class="sub small" style="margin-top:8px">Toque em alguém para ver por que a carta mudou.</p>';
     else h += '<p class="sub">Ninguém recebeu votos suficientes nesta partida.</p>';
     return section('Notas da galera', h);
   }
@@ -3876,9 +3989,9 @@ async function savePagoEntry(pid, entry) {
 // Quem criou a ficha mantém a lista de quem pode ler em dia com os admins atuais.
 function refreshPagos() {
   if (!FBM() || !S.turma || !window.MCloud.pagoVis) return;
-  for (const d of [...Object.values(S.pagos), ...Object.values(S.notasDocs)]) {
+  for (const d of [...Object.values(S.pagos), ...Object.values(S.notasDocs), ...Object.values(S.contests)]) {
     if (d.createdBy !== meId() || d.turma !== S.turmaId) continue;
-    const want = d.kind === 'notas' ? [...new Set([meId(), ...(S.turma.admins || [])])] : [...new Set([...(String(d.pid).startsWith('g_') ? [] : [d.pid]), ...(S.turma.admins || []), meId()])];
+    const want = d.kind === 'notas' || d.kind === 'contest' ? [...new Set([meId(), ...(S.turma.admins || [])])] : [...new Set([...(String(d.pid).startsWith('g_') ? [] : [d.pid]), ...(S.turma.admins || []), meId()])];
     const cur = d.visibleTo || [];
     if (want.length !== cur.length || want.some(u => !cur.includes(u))) { d.visibleTo = want; window.MCloud.pagoVis(d.id, want).catch(() => { }); }
   }
@@ -4533,6 +4646,17 @@ const ACT = {
     if (az.length < 2) { $('#fErr').textContent = 'Marque quem jogou no time azul.'; return; }
     closeSheet(); aplicarAcerto(g, az, am);
   },
+  porque: el => { if (S.ui.sheet) closeSheet(); openSheet({ type: 'porque', gid: el.dataset.gid, pid: el.dataset.pid }); },
+  contestar: el => { const g = S.games[el.dataset.id]; if (g && podeContestar(g)) openSheet({ type: 'contestar', gid: g.id }); },
+  contestEnviar: async el => {
+    const g = S.games[(S.ui.sheet || {}).gid]; if (!g || !podeContestar(g)) return closeSheet();
+    const motivo = (($('#ctMotivo') || {}).value || '').trim().slice(0, 200), me = meId(), id = `ct_${g.id}_${me}`;
+    const data = { kind: 'contest', turma: S.turmaId, gid: g.id, createdBy: me, visibleTo: [...new Set([me, ...((S.turma && S.turma.admins) || [])])], motivo, rev: g.resultRev || 0, at: Date.now(), votes: {}, conf: [], created: Date.now() };
+    el.disabled = true;
+    try { if (S.contests[id]) await window.MCloud.partidaSave(id, { motivo, rev: data.rev, at: data.at, visibleTo: data.visibleTo }); else await window.MCloud.partidaCreate(id, data); S.contests[id] = Object.assign({ id }, data); closeSheet(); render(); toast('Contestação enviada. Os admins vão revisar.'); }
+    catch (e) { el.disabled = false; $('#fErr').textContent = 'Não consegui enviar agora. Tente de novo.'; }
+  },
+  contestManter: el => { const g = S.games[el.dataset.id]; if (!g || !canEditGame(g)) return; g.contest = { st: 'mantido', rev: g.resultRev || 0, at: Date.now(), n: (g.contest && g.contest.n) || 0, by: meId() }; persist('games', g.id); render(); toast('Placar mantido. A partida volta a contar.'); },
   corrigirFinal: () => { const g = curGame(); if (!g || !canEditGame(g)) return; S.ui.editFinal = true; S.ui.step = 'times'; render(); window.scrollTo(0, 0); },
   verResultado: () => { S.ui.editFinal = false; S.ui.step = null; render(); window.scrollTo(0, 0); },
   retrySave: el => { const g = S.games[el.dataset.id]; if (!g) return; delete SAVE.err['games/' + g.id]; persist('games', g.id); render(); },
@@ -4710,8 +4834,7 @@ const ACT = {
     const max = clamp(parseInt($('#fMax').value, 10) || 0, 0, 60);
     const place = $('#fPlace').value.trim().slice(0, 80), note = $('#fNote').value.trim().slice(0, 300);
     const id = el.dataset.id;
-    const visBtn = document.querySelector('[data-act="gVis"][aria-pressed="true"]');
-    const vis = FB() && visBtn ? visBtn.dataset.v : 'turma';
+    const lv = lerVis(), vis = FB() ? lv.vis : 'turma';
     const allowed = vis === 'privada' && meId() ? [meId()] : [];
     const rep = FB() && !!document.querySelector('[data-act="gRepeat"][aria-pressed="true"]');
     if (id && S.games[id]) {
@@ -4726,12 +4849,26 @@ const ACT = {
       const gid = uid('g');
       const g = cleanGame(gid, { date, time, max, place, note, vis, allowed, created: Date.now(), createdBy: meId(), track: last ? last.track : ['saq', 'rec'], nTeams: last ? last.nTeams : 2, repeat: rep, serie: rep ? gid : '', seq: rep ? 1 : 0 });
       S.games[g.id] = g; persist('games', g.id);
-      closeSheet(); S.ui.gameId = g.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0); toast('Jogo marcado.');
+      closeSheet(); S.ui.gameId = g.id; S.ui.step = 'presenca'; render(); window.scrollTo(0, 0);
+      if (FBM() && lv.aberto) setTimeout(() => { openSheet({ type: 'abrir', gid: g.id }); toast('Jogo marcado. Agora escolha as vagas para quem é de fora.'); }, 350);
+      else toast('Jogo marcado.');
     }
   },
   gVis: el => {
     document.querySelectorAll('[data-act="gVis"]').forEach(b => b.setAttribute('aria-pressed', String(b === el)));
-    const hint = $('#gVisHint'); if (hint) hint.hidden = el.dataset.v !== 'privada';
+    const v = el.dataset.v, conv = v === 'amigos' || v === 'privada';
+    const cb = document.querySelector('[data-act="gVisConv"]'); if (cb) cb.setAttribute('aria-pressed', String(conv));
+    const ab = document.querySelector('[data-act="gVisAberto"]'); if (ab) ab.setAttribute('aria-pressed', 'false');
+    const box = $('#gConv'); if (box) box.hidden = !conv;
+    const hint = $('#gVisHint'); if (hint) { hint.hidden = false; hint.textContent = VIS_HINT[v] || ''; }
+  },
+  gVisConv: () => { const cur = document.querySelector('#gConv [data-act="gVis"][aria-pressed="true"]'); ACT.gVis(cur || document.querySelector('#gConv [data-act="gVis"][data-v="privada"]')); },
+  gVisAberto: el => {
+    document.querySelectorAll('[data-act="gVis"]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    const cb = document.querySelector('[data-act="gVisConv"]'); if (cb) cb.setAttribute('aria-pressed', 'false');
+    el.setAttribute('aria-pressed', 'true');
+    const box = $('#gConv'); if (box) box.hidden = true;
+    const hint = $('#gVisHint'); if (hint) { hint.hidden = false; hint.textContent = VIS_HINT.aberto; }
   },
   gAllow: el => el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')),
   openPartida: el => { if (!S.partidas[el.dataset.id]) return; if (S.ui.sheet) closeSheet(); S.ui.partidaId = el.dataset.id; S.ui.gameId = null; render(); window.scrollTo(0, 0); },
