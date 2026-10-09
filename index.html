@@ -565,6 +565,45 @@ input[type=date].input::-webkit-datetime-edit,input[type=time].input::-webkit-da
 .score:focus, .set select:focus{outline:0; box-shadow:inset 0 0 0 2px var(--focus)}
 .paid, .join-btn, .pos-grid button, .nt-n, .stb, .nudge{transition:background-color .2s, transform .12s}
 .paid:active, .join-btn:active, .pos-grid button:active, .nt-n:active, .stb:active, .nudge:active{transform:scale(.96)}
+
+/* ================= Polimento v2: telas ================= */
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+.toggle.tg-ic, .toggle.tg-ic[aria-pressed="true"]{min-width:44px; width:44px; padding:0; background:transparent; display:grid; place-items:center}
+.toggle.tg-ic .tg-c{width:30px; height:30px; border-radius:50%; box-shadow:inset 0 0 0 2px var(--line-strong); display:grid; place-items:center; transition:background-color .2s, box-shadow .2s}
+.toggle.tg-ic[aria-pressed="true"] .tg-c{background:#0F2240; box-shadow:none; color:#F7C531}
+.toggle.tg-ic svg{width:16px; height:16px}
+.toggle.tg-me[aria-pressed="true"]{background:var(--surface-2); color:var(--ink)}
+.toggle.tg-me[aria-pressed="false"]{background:var(--ball); color:var(--ball-ink)}
+.pres.pres-me{background:color-mix(in srgb, var(--ball) 13%, transparent)}
+.paid.paid-ic{min-width:36px; width:36px; min-height:36px; height:36px; padding:0; border-radius:50%; font-size:11px; font-weight:800; display:grid; place-items:center; color:var(--muted)}
+.paid.paid-ic[aria-pressed="true"]{background:#DCF3E4; color:#14653A}
+.paid.paid-ic svg{width:15px; height:15px}
+.rt{min-width:46px; height:30px; padding:0 6px; border-radius:9px; display:inline-flex; align-items:center; justify-content:center; font-family:var(--display); font-weight:800; font-size:17px; color:#fff; font-variant-numeric:tabular-nums; flex:none}
+.r9{background:#0B6B35} .r8{background:#16884A} .r7{background:#4E9F3D} .r6{background:#E6A700; color:#2E2300} .r5{background:#D9480F}
+.nt-mvp{background:linear-gradient(135deg,#FFF6D6 0%,#FFE29A 100%); color:#3B2A00; box-shadow:0 10px 24px -14px rgba(160,120,0,.6)}
+.nt-mvp .nt-k{color:#8A6500} .nt-mvp .nt-name{color:#0F2240} .nt-mvp .nt-sub{color:#6B5A2E}
+.nt-mvp .av{box-shadow:0 0 0 2px #FFF6D6, 0 0 0 4px #E3B341}
+.podium{display:grid; grid-template-columns:1fr 1.15fr 1fr; align-items:end; gap:8px; margin:16px 0 14px}
+.pod-c{display:flex; flex-direction:column; align-items:center; gap:6px; width:100%; min-width:0}
+.pod-av .av{width:56px; height:56px; font-size:18px}
+.pod-1 .pod-av .av{width:68px; height:68px; font-size:22px; box-shadow:0 0 0 2px var(--bg), 0 0 0 4px #E3B341}
+.pod-2 .pod-av .av{box-shadow:0 0 0 2px var(--bg), 0 0 0 4px #A3AFBC}
+.pod-3 .pod-av .av{box-shadow:0 0 0 2px var(--bg), 0 0 0 4px #C98B55}
+.pod-crown{color:#F7C531; height:18px; display:block}
+.pod-nm{font-size:14px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.pod-base{width:100%; border-radius:18px 18px 10px 10px; display:flex; justify-content:center; padding-top:8px; font-family:var(--display); font-weight:900; font-size:28px; color:#0F2240}
+.pod-1 .pod-base{height:92px; background:linear-gradient(180deg,#FFE89A,#F7C531)}
+.pod-2 .pod-base{height:68px; background:linear-gradient(180deg,#EEF2F6,#C9D2DC)}
+.pod-3 .pod-base{height:54px; background:linear-gradient(180deg,#F6D2B0,#D9A178)}
+.rk-ovr{min-width:40px; height:28px; border-radius:9px; background:#0F2240; color:#F7C531; display:inline-flex; align-items:center; justify-content:center; font-family:var(--display); font-weight:800; font-size:16px; padding:0 6px; flex:none}
+.rk-pct{font-family:var(--display); font-weight:800; font-size:18px; min-width:40px; text-align:right; flex:none}
+.rk-pos{width:22px; text-align:center; font-family:var(--display); font-weight:800; font-size:17px; color:var(--muted); flex:none}
+.rk-me{background:color-mix(in srgb, var(--ball) 13%, transparent)}
+.rk-row .nt-d{margin-right:2px}
+.rk-row .item-title, .rk-row .item-sub{display:block}
+.fab{position:fixed; z-index:25; right:max(20px, calc(50% - 260px)); bottom:calc(98px + env(safe-area-inset-bottom,0px)); width:58px; height:58px; border-radius:20px; background:var(--ball); color:var(--ball-ink); display:grid; place-items:center; box-shadow:0 12px 26px -10px rgba(150,110,0,.75); transition:transform .12s}
+.fab svg{width:26px; height:26px}
+.fab:active{transform:scale(.94)}
 @media (prefers-reduced-motion:reduce){
   .sheet, .sheet-bg{animation:none}
   .btn, .chip, .toggle, .card-btn, .item{transition:none}
@@ -1840,7 +1879,7 @@ function agendaView() {
   if (toVote) h += voteBanner(toVote);
   if (!up[0]) h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${canCreate() ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
   if (up.length > 1) h += section('Próximos', listBox(up.slice(1).map(gameRow)));
-  if (canCreate() && up[0]) h += `<div style="margin-top:12px"><button class="btn btn-block" data-act="newGame">${ICON.plus}Marcar outro jogo</button></div>`;
+  if (canCreate() && up[0]) h += `<button class="fab" data-act="newGame" aria-label="Marcar jogo">${ICON.plus}</button>`;
   h += partidasSection();
   if (past.length) h += section('Anteriores', listBox(past.slice(0, 40).map(gameRow)));
   if (!Object.keys(S.players).length && S.canWrite) h += `<div class="empty" style="margin-top:20px"><h3>Cadastre a galera</h3><p class="sub">Cada jogador ganha uma carta. Depois é só confirmar presença e sortear os times.</p><button class="btn" data-act="newPlayer">${ICON.plus}Novo jogador</button></div>`;
@@ -1919,13 +1958,13 @@ function whoPlayedHTML(g) {
   if (!FB() || !privacyOn() || !hasResult(g)) return '';
   const ids = teamIds(g).filter(id => id !== meId() && P(id));
   if (!ids.length) return '';
-  return section('Quem jogou', listBox(ids.map(id => { const p = P(id), ti = teamOfId(g, id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${p.guest ? 'Convidado' : esc((POS[p.pos] || POS.cor).name)}${ti >= 0 ? `, time ${TEAMS[ti].name.toLowerCase()}` : ''}</div></div>${friendBtn(id)}</div>`; })));
+  return section('Quem jogou', listBox(ids.map(id => { const p = P(id), ti = teamOfId(g, id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${p.guest ? 'Convidado' : esc((POS[p.pos] || POS.cor).name)}${ti >= 0 ? `, time ${TEAMS[ti].name.toLowerCase()}` : ''}</div></div>${friendState(id) === 'friend' ? '' : friendBtn(id)}</div>`; })));
 }
 function elencoSocial() {
   const filter = S.ui.elencoFilter || '', mine = P(meId());
   let h = banners();
   h += searchBoxHTML();
-  if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${plural(friendIds().length, 'amigo', 'amigos')}</div></div></div>`;
+  if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${esc(tierOf(ovrOf(mine)).name)} · ${ovrOf(mine)}</div>${mine.last && mine.last.d ? `<div class="nt-d ${mine.last.d > 0 ? 'up' : 'down'}">${mine.last.d > 0 ? '↑' : '↓'} ${Math.abs(mine.last.d)} no último jogo</div>` : ''}${friendIds().length ? `<div class="sub small">${plural(friendIds().length, 'amigo', 'amigos')}</div>` : ''}</div></div>`;
   if (!filter) { const sug = suggestions().filter(c => !S.players[c.id]); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
   const cnt = coPlayers();
   let ids = filter === 'recentes' ? [...cnt.keys()] : filter === 'amigos' ? friendIds() : Object.keys(S.players);
@@ -1935,7 +1974,7 @@ function elencoSocial() {
   const tname = (S.turma && S.turma.name) || 'Turma', many = (S.myTurmas || []).length > 1;
   h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px">${many
     ? `<button class="turma-switch" data-act="turmaMenu" aria-label="${esc(tname)}. Trocar de turma"><span class="h-sec" style="margin:0">${esc(tname)}</span>${ICON.down}</button>`
-    : `<h2 class="h-sec" style="margin:0">${esc(tname)}</h2>`}<span class="spacer"></span><span class="sub small">${plural(Object.keys(S.members).length, 'pessoa', 'pessoas')}</span></div>`;
+    : `<h2 class="h-sec" style="margin:0">${esc(tname)}</h2>`}<span class="spacer"></span><span class="sub small">${plural(Object.keys(S.players).length, 'jogador', 'jogadores')}</span></div>`;
   const chip = (k, l) => `<button class="chip" data-act="sort" data-sort="${k}" aria-pressed="${S.ui.sort === k}">${l}</button>`;
   const fchip = (k, l) => `<button class="chip" data-act="elencoFilter" data-v="${k}" aria-pressed="${filter === k}">${l}</button>`;
   h += `<div class="chips-line">${chip('ovr', 'Geral')}${chip('nome', 'Nome')}${chip('pos', 'Posição')}<span class="chip-sep" aria-hidden="true"></span>${fchip('amigos', 'Amigos')}${fchip('recentes', 'Jogou comigo')}</div>`;
@@ -1982,30 +2021,31 @@ function elencoView() {
 }
 
 function rankingView() {
-  let ps = Object.keys(S.players).map(P);
-  const social = FB() && privacyOn(), scope = S.ui.rankScope || 'turma';
-  if (social && scope !== 'turma') {
-    const ids = scope === 'recentes' ? new Set([meId(), ...coPlayers().keys()]) : new Set([meId(), ...friendIds()]);
-    ps = ps.filter(p => ids.has(p.id));
-  }
-  if (!ps.length) return banners() + `<div class="empty" style="margin-top:16px"><h3>Ranking vazio</h3><p class="sub">O ranking aparece quando o elenco tiver jogadores.</p></div>`;
+  let ps = Object.keys(S.players).map(P).filter(Boolean);
+  const social = FB() && privacyOn(), scope = S.ui.rankScope === 'amigos' ? 'amigos' : 'turma';
+  if (social && scope === 'amigos') { const ids = new Set([meId(), ...friendIds()]); ps = ps.filter(p => ids.has(p.id)); }
+  const sort = ['vit', 'nota'].includes(S.ui.rankSort) ? S.ui.rankSort : 'ovr';
   const pct = p => p.tot.sets ? p.tot.setsV / p.tot.sets : -1;
   const avg = p => p.tot.notaN ? p.tot.notaSum / p.tot.notaN : -1;
-  const gm = {}; if (FBM()) for (const p of ps) gm[p.id] = galeraMvpCount(p.id);
-  const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), vit: (a, b) => pct(b) - pct(a) || b.tot.sets - a.tot.sets, nota: (a, b) => avg(b) - avg(a), pres: (a, b) => b.tot.jogos - a.tot.jogos || ovrOf(b) - ovrOf(a), galera: (a, b) => (gm[b.id] || 0) - (gm[a.id] || 0) || ovrOf(b) - ovrOf(a) };
-  const galeraCol = S.ui.rankSort === 'galera' && FBM();
-  ps.sort(sorters[S.ui.rankSort] || sorters.ovr);
-  const chip = (k, l) => `<button class="chip" data-act="rankSort" data-sort="${k}" aria-pressed="${S.ui.rankSort === k}">${l}</button>`;
-  const rows = ps.map((p, i) => `<tr>
-    <td><button class="row rk" data-act="openPlayer" data-pid="${esc(p.id)}"><span class="num rk-n">${i + 1}</span>${avatar(p)}<span class="rk-name"><b>${esc(p.nick || p.name)}</b><span>${(POS[p.pos] || POS.cor).abbr}</span></span></button></td>
-    <td><span class="num">${ovrOf(p)}</span></td>
-    <td>${p.tot.jogos}</td>
-    <td>${p.tot.sets ? Math.round(pct(p) * 100) + '%' : '–'}</td>
-    <td>${galeraCol ? `<span class="num">${gm[p.id] || 0}</span>` : (p.tot.notaN ? fmtN(avg(p)) : '–')}</td>
-  </tr>`).join('');
-  return banners() + (social ? `<div class="seg seg-full" style="grid-template-columns:1fr 1fr 1fr;margin-top:14px" role="group" aria-label="Quem entra no ranking"><button data-act="rankScope" data-v="turma" aria-pressed="${scope === 'turma'}">Turma</button><button data-act="rankScope" data-v="amigos" aria-pressed="${scope === 'amigos'}">Amigos</button><button data-act="rankScope" data-v="recentes" aria-pressed="${scope === 'recentes'}">Jogou comigo</button></div>` : '') + `<div class="row-wrap" style="margin:16px 0 12px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Nota')}${chip('pres', 'Presença')}${FBM() ? chip('galera', 'MVP da galera') : ''}</div>
-  <div class="tbl-wrap"><table class="rank-tbl"><thead><tr><th>Jogador</th><th>Geral</th><th>Jogos</th><th>Vit.</th><th>${galeraCol ? 'MVPs' : 'Nota'}</th></tr></thead><tbody>${rows}</tbody></table></div>
-  <p class="sub small" style="margin-top:10px">Vit. é a porcentagem de sets vencidos. ${galeraCol ? 'MVPs é quantas vezes a galera votou no jogador como melhor da partida.' : 'Nota é a média das notas de 0 a 10 dos jogos com placar.'}</p>`;
+  const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), vit: (a, b) => pct(b) - pct(a) || b.tot.sets - a.tot.sets || ovrOf(b) - ovrOf(a), nota: (a, b) => avg(b) - avg(a) || ovrOf(b) - ovrOf(a) };
+  let h = banners();
+  if (social) h += `<div class="seg seg-full" style="grid-template-columns:1fr 1fr;margin-top:14px" role="group" aria-label="Quem entra no ranking"><button data-act="rankScope" data-v="turma" aria-pressed="${scope === 'turma'}">Turma</button><button data-act="rankScope" data-v="amigos" aria-pressed="${scope === 'amigos'}">Amigos</button></div>`;
+  const chip = (k, l) => `<button class="chip" data-act="rankSort" data-sort="${k}" aria-pressed="${sort === k}">${l}</button>`;
+  h += `<div class="chips-line" style="margin:12px 0 4px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Notas')}</div>`;
+  if (!ps.length) return h + `<div class="empty" style="margin-top:16px"><h3>Ranking vazio</h3><p class="sub">${scope === 'amigos' ? 'Quando você tiver amigos no app, eles aparecem aqui.' : 'O ranking aparece quando o elenco tiver jogadores.'}</p></div>`;
+  ps.sort(sorters[sort]);
+  const val = p => sort === 'ovr' ? `<span class="rk-ovr num">${ovrOf(p)}</span>` : sort === 'vit' ? `<span class="rk-pct num">${p.tot.sets ? Math.round(pct(p) * 100) + '%' : '–'}</span>` : (p.tot.notaN ? `<span class="rt ${rtCls(avg(p))}">${fmtN(avg(p))}</span>` : '<span class="rk-pct">–</span>');
+  const trend = p => p.last && p.last.d ? `<span class="nt-d ${p.last.d > 0 ? 'up' : 'down'}">${p.last.d > 0 ? '▲' : '▼'}${Math.abs(p.last.d)}</span>` : '';
+  const nm = p => esc(p.nick || p.name) + (p.id === meId() ? ' <span class="sub small">(você)</span>' : '');
+  let rest = ps;
+  if (ps.length >= 3) {
+    rest = ps.slice(3);
+    const pod = (p, place) => `<button class="pod-c pod-${place}" data-act="openPlayer" data-pid="${esc(p.id)}" aria-label="${place}º lugar: ${esc(p.nick || p.name)}">${place === 1 ? `<span class="pod-crown">${CROWN_SVG}</span>` : ''}<span class="pod-av">${avatar(p)}</span><b class="pod-nm">${nm(p)}</b>${val(p)}<span class="pod-base num">${place}</span></button>`;
+    h += `<div class="podium">${pod(ps[1], 2)}${pod(ps[0], 1)}${pod(ps[2], 3)}</div>`;
+  }
+  if (rest.length) h += `<div class="list rank-list">${rest.map((p, i) => `<button class="item rk-row${p.id === meId() ? ' rk-me' : ''}" data-act="openPlayer" data-pid="${esc(p.id)}"><span class="rk-pos num">${i + (ps.length >= 3 ? 4 : 1)}</span>${avatar(p)}<span class="item-main"><span class="item-title">${nm(p)}</span><span class="item-sub">${esc((POS[p.pos] || POS.cor).name)}</span></span>${trend(p)}${val(p)}</button>`).join('')}</div>`;
+  h += `<p class="sub small" style="margin-top:10px">${sort === 'ovr' ? 'Geral é o número da carta. A seta mostra quanto ela mudou no último jogo.' : sort === 'vit' ? 'Vitórias é a porcentagem de sets vencidos.' : 'Notas é a média das notas que a galera deu.'}</p>`;
+  return h;
 }
 
 // ---------- Jogo ----------
@@ -2059,12 +2099,12 @@ function presencaStep(g, confN) {
   let h = `<p class="sub" style="margin:12px 0">${confN ? `${plural(confN, 'confirmado', 'confirmados')}${g.max ? ` para ${g.max} vagas` : ''}${wait ? `, ${wait} na espera` : ''}${paid ? `. ${paid} já ${paid === 1 ? 'pagou' : 'pagaram'}` : ''}.` : 'Toque em confirmar para quem vai jogar. A ordem de confirmação vira a ordem de chegada.'}</p>`;
   if (FB() && g.vis === 'privada') h += `<p class="sub small" style="margin:-4px 0 10px">Partida privada: ${plural(g.allowed.filter(u => u !== g.createdBy).length, 'convidado', 'convidados')} além de quem marcou.</p>`;
   h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><button class="btn btn-sm" data-act="openAgenda">${ICON.cal}Agendar</button>${FBM() && W && !g.aberto && g.status !== 'encerrado' ? '<button class="btn btn-sm" data-act="abrirVagas">Abrir vagas</button>' : ''}</div>` + abertoAdminHTML(g);
-  const row = (p, i, on) => `<div class="pres">
+  const row = (p, i, on) => `<div class="pres${p.id === meId() ? ' pres-me' : ''}">
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
     <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
     ${on && !W && FB() && privacyOn() && canFriend(p.id) && friendState(p.id) !== 'friend' ? friendBtn(p.id) : ''}
-    ${on && W ? `<button class="paid" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(p.nick || p.name)} pagou">${g.paid.includes(p.id) ? 'Pagou' : 'Pagou?'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
-    ${W || (FB() && p.id === meId()) ? `<button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? (p.id === meId() ? 'Desmarcar' : 'Vai') : (p.id === meId() ? 'Vou' : 'Confirmar')}</button>` : ''}
+    ${on && W ? `<button class="paid paid-ic" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(p.nick || p.name)} pagou">${g.paid.includes(p.id) ? CHECK_SVG : 'R$'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
+    ${W || (FB() && p.id === meId()) ? `${p.id === meId() ? `<button class="toggle tg-me" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Desmarcar' : 'Vou'}</button>` : `<button class="toggle tg-ic" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}" aria-label="${on ? 'Desmarcar' : 'Confirmar'} ${esc(p.nick || p.name)}"><span class="tg-c">${on ? CHECK_SVG : ''}</span><span class="sr">${on ? 'Vai' : 'Confirmar'}</span></button>`}` : ''}
   </div>`;
   if (conf.length) h += listBox(conf.map((id, i) => row(P(id), i, true)));
   const shownOthers = W ? others : others.filter(p => p.id === meId() && canJoinGame(g));
@@ -3373,6 +3413,16 @@ function acertoEscolhaHTML(g, sh) {
   return h;
 }
 
+// Nota por cor, como nos apps de futebol: dá para ler o desempenho de relance.
+const rtCls = v => v >= 8.5 ? 'r9' : v >= 7.5 ? 'r8' : v >= 6.5 ? 'r7' : v >= 6 ? 'r6' : 'r5';
+const CROWN_SVG = '<svg width="26" height="18" viewBox="0 0 26 18" aria-hidden="true"><path d="M2 16L4 4l6 6 3-8 3 8 6-6 2 12z" fill="currentColor"/></svg>';
+function cartaTxt(dd) {
+  if (dd == null) return '';
+  if (dd >= 0.05) return `<span class="nt-d up">carta ↑ ${fmtN(dd)}</span>`;
+  if (dd <= -0.05) return `<span class="nt-d down">carta ↓ ${fmtN(-dd)}</span>`;
+  return 'carta igual';
+}
+
 // ================= Dia de jogo: times na mão, jogo em andamento e notas da galera (0 a 10) =================
 const startTs = g => new Date(`${g.date}T${g.time || '20:00'}`).getTime();
 const emAndamento = g => g.status !== 'encerrado' && Date.now() >= startTs(g) && Date.now() < startTs(g) + 6 * 3600e3;
@@ -3443,8 +3493,8 @@ function notasHTML(g) {
     const r = g.galera, ids = Object.keys(r.notas || {}).filter(P).sort((a, b) => r.notas[b].m - r.notas[a].m || r.notas[b].n - r.notas[a].n);
     const res = resultOf(g), delta = pid => { const x = res && res.players && res.players[pid]; return x && x.ovrBefore != null ? x.ovrAfter - x.ovrBefore : null; };
     let h = '';
-    if (r.mvp && P(r.mvp) && r.notas[r.mvp]) h += `<div class="nt-mvp">${avatar(P(r.mvp))}<div class="item-main"><div class="nt-k">MVP da galera</div><div class="nt-name">${esc(P(r.mvp).nick || P(r.mvp).name)}</div><div class="nt-sub">nota ${fmtN(r.notas[r.mvp].m)} com ${plural(r.notas[r.mvp].n, 'voto', 'votos')}</div></div></div>`;
-    if (ids.length) h += listBox(ids.map(pid => { const dd = delta(pid); return `<div class="pres"${pid === me ? ' style="background:rgba(247,197,49,.14)"' : ''}>${avatar(P(pid))}<div class="item-main"><div class="item-title">${pid === me ? 'Você' : esc(P(pid).nick || P(pid).name)}</div><div class="item-sub">${plural(r.notas[pid].n, 'voto', 'votos')}</div></div>${dd != null && Math.abs(dd) >= 0.05 ? `<span class="nt-d ${dd > 0 ? 'up' : 'down'}">${dd > 0 ? '+' : '−'}${fmtN(Math.abs(dd))}</span>` : ''}<span class="nt-nota num">${fmtN(r.notas[pid].m)}</span></div>`; })) + '<p class="sub small" style="margin-top:8px">A carta muda pela diferença para a média do jogo: se todo mundo der 8 para todo mundo, ninguém sobe por isso.</p>';
+    if (r.mvp && P(r.mvp) && r.notas[r.mvp]) h += `<div class="nt-mvp">${avatar(P(r.mvp))}<div class="item-main"><div class="nt-k">MVP da galera</div><div class="nt-name">${esc(P(r.mvp).nick || P(r.mvp).name)}</div><div class="nt-sub">${plural(r.notas[r.mvp].n, 'voto', 'votos')}</div></div><span class="rt ${rtCls(r.notas[r.mvp].m)}">${fmtN(r.notas[r.mvp].m)}</span></div>`;
+    if (ids.length) h += listBox(ids.map(pid => { const dd = delta(pid); const ct = cartaTxt(dd); return `<div class="pres${pid === me ? ' pres-me' : ''}">${avatar(P(pid))}<div class="item-main"><div class="item-title">${pid === me ? 'Você' : esc(P(pid).nick || P(pid).name)}</div><div class="item-sub">${ct ? ct + ' · ' : ''}${plural(r.notas[pid].n, 'voto', 'votos')}</div></div><span class="rt ${rtCls(r.notas[pid].m)}">${fmtN(r.notas[pid].m)}</span></div>`; })) + '<p class="sub small" style="margin-top:8px">A carta muda pela diferença para a média do jogo: se todo mundo der 8 para todo mundo, ninguém sobe por isso.</p>';
     else h += '<p class="sub">Ninguém recebeu votos suficientes nesta partida.</p>';
     return section('Notas da galera', h);
   }
