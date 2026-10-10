@@ -86,11 +86,13 @@ service cloud.firestore {
 
       // Pedido de vaga: só quem pediu e quem organiza leem.
       match /pedidos/{u} {
-        allow read: if signedIn() && (me() == u || get(/databases/$(database)/documents/abertos/$(g)).data.createdBy == me());
+        allow read: if signedIn() && (me() == u || get(/databases/$(database)/documents/abertos/$(g)).data.createdBy == me()
+          || isAdmin(get(/databases/$(database)/documents/abertos/$(g)).data.turma));
         allow create: if signedIn() && me() == u && request.resource.data.status == 'pendente';
         allow update: if signedIn() && (
           (me() == u && changed().hasOnly(['status', 'at']) && request.resource.data.status in ['pendente', 'cancelado'])
-          || get(/databases/$(database)/documents/abertos/$(g)).data.createdBy == me());
+          || get(/databases/$(database)/documents/abertos/$(g)).data.createdBy == me()
+          || isAdmin(get(/databases/$(database)/documents/abertos/$(g)).data.turma));
         allow delete: if signedIn() && (me() == u || get(/databases/$(database)/documents/abertos/$(g)).data.createdBy == me());
       }
     }

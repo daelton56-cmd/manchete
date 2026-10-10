@@ -1175,7 +1175,7 @@ const S = {
   ui: { notasPrompted: {}, tab: 'jogos', gameId: null, step: null, selP: null, swapSel: null, sort: 'ovr', rankSort: 'ovr', openRep: null, flash: '', sheet: null, form: null, pendingRender: false },
   migrateOffer: false,
   me: null, turmaId: null, turma: null, members: {}, unsubs: [], authTab: 'entrar', authMsg: '', authBusy: false,
-  rawPersonal: new Set(), contests: {}, notasDocs: {}, notasMine: {}, partidas: {}, pagos: {}, abertos: {}, pedidosOrg: {}, pedidosMeus: {}, myPedidosIdx: {}, geo: null, friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
+  rawPersonal: new Set(), outros: {}, contests: {}, notasDocs: {}, notasMine: {}, partidas: {}, pagos: {}, abertos: {}, pedidosOrg: {}, pedidosMeus: {}, myPedidosIdx: {}, geo: null, friendships: {}, profiles: {}, rosters: {}, myMirrors: {}, fofMirrors: {}, publicProfiles: {}, myToken: '', social: { profiles: new Map(), rosters: new Map() }
 };
 const FBM = () => !!window.MANCHETE_FIREBASE;
 const FB = () => FBM() && S.mode === 'cloud' && !!S.me && !!S.turmaId;
@@ -1608,7 +1608,7 @@ function stopListening() {
   for (const off of S.unsubs.splice(0)) { try { off(); } catch (e) { } }
   for (const m of [S.social.profiles, S.social.rosters]) { for (const off of m.values()) { try { off(); } catch (e) { } } m.clear(); }
 }
-function resetData() { S.amigoSug = null; S.contests = {}; S.notasDocs = {}; S.notasMine = {}; S.ui.notasPrompted = {}; stopAbertos(); S.abertos = {}; S.pedidosOrg = {}; S.pedidosMeus = {}; S.ui.abertoId = null; S.partidasOn = false; S.partidas = {}; S.pagos = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
+function resetData() { S.amigoSug = null; S.outros = {}; S.contests = {}; S.notasDocs = {}; S.notasMine = {}; S.ui.notasPrompted = {}; stopAbertos(); S.abertos = {}; S.pedidosOrg = {}; S.pedidosMeus = {}; S.ui.abertoId = null; S.partidasOn = false; S.partidas = {}; S.pagos = {}; S.ui.partidaId = null; S.firmData = false; S.players = {}; S.games = {}; S.turma = null; S.members = {}; S.turmaId = null; S.profiles = {}; S.rosters = {}; S.fofMirrors = {}; S.publicProfiles = {}; S.myToken = ''; S.ui.peopleQ = ''; S.ui.peopleHits = null; S.social.profiles.clear(); S.social.rosters.clear(); S.fofAt = 0; dirty(); for (const k of Object.keys(PEND)) delete PEND[k]; S.ui.gameId = null; }
 function bootFirebase() {
   S.mode = 'auth-wait'; S.invite = readInvite(); render();
   const go = () => { if (S.authOff) return; S.authOff = window.MCloud.onAuth(u => onAuthChange(u)); };
@@ -1657,7 +1657,7 @@ function openTurma(t) {
     if (S.pendingAutoFriend) runAutoFriend();
     if (S.firmData) runPrivacyMigration();
   }, () => lostTurma()));
-  startSocial(); loadMyTurmas(); startPartidas(); startAbertos();
+  stopOutros(); startSocial(); loadMyTurmas(); startPartidas(); startAbertos();
   S.unsubs.push(window.MCloud.watchMembers(t, list => { const m = {}; for (const x of list) if (x && x.uid) m[x.uid] = x; S.members = m; dirty(); render(); }, () => { }));
   subscribe();
   setTimeout(() => { if (S.mode === 'loading-cloud' && S.turmaId === t) { S.loadErr = true; render(); } }, 20000);
@@ -1666,6 +1666,7 @@ function loadMyTurmas() {
   if (!S.me || !window.MCloud || !window.MCloud.listTurmas) return;
   window.MCloud.listTurmas(S.me.uid).then(list => {
     S.myTurmas = (list || []).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+    setTimeout(syncOutros, 0);
     if (S.ui.sheet && S.ui.sheet.type === 'perfil') renderSheet();
     if (S.mode === 'no-turma') render();
     if (S.mode === 'cloud') render();
@@ -1996,7 +1997,12 @@ function agendaView() {
   if (FBM()) h += abertoStripHTML() + abertoVouHTML();
   if (toVote) h += voteBanner(toVote);
   if (!up[0]) h += `<div class="empty" style="margin-top:16px"><h3>Nenhum jogo marcado</h3><p class="sub">Marque o próximo vôlei e vá confirmando quem vai.</p>${canCreate() ? `<button class="btn btn-ball" data-act="newGame">${ICON.plus}Marcar jogo</button>` : ''}</div>`;
-  if (up.length > 1) h += section('Próximos', listBox(up.slice(1).map(gameRow)));
+  const fora = FBM() ? jogosDeFora() : [];
+  if (!up[0] && fora[0]) h += `<div class="lj-fora-dica sub small" style="margin:14px 2px 6px">Nada marcado aqui, mas você tem jogo em outro lugar:</div>`;
+  if (up.length > 1 || fora.length) {
+    const linhas = [...up.slice(1).map(g => ({ g, html: gameRow(g) })), ...fora.map(x => ({ g: x.g, html: rowDeFora(x) }))].sort((a, b) => byDate(a.g, b.g));
+    h += section(fora.length ? 'Seus próximos jogos' : 'Próximos', listBox(linhas.map(x => x.html)));
+  }
   if (canCreate() && up[0]) h += `<button class="fab" data-act="newGame" aria-label="Marcar jogo">${ICON.plus}</button>`;
   h += partidasSection();
   if (past.length) h += section('Anteriores', listBox(past.slice(0, 40).map(gameRow)));
@@ -3699,6 +3705,46 @@ function amigoSugBanner() {
   return `<div class="banner" style="flex-wrap:wrap"><span class="spacer">Quer adicionar ${esc(nome)} como amigo?</span><button class="btn btn-sm btn-ball" data-act="amigoSugOk">Adicionar</button><button class="btn btn-sm btn-ghost" data-act="amigoSugNao">Agora não</button></div>`;
 }
 
+// ================= Início: os jogos de todos os lugares da pessoa =================
+// A turma aberta continua carregada inteira; dos outros lugares (outras turmas, o próprio espaço
+// e os jogos em que te chamaram) o app acompanha só os jogos, para mostrar tudo numa lista.
+const OUTROS = { subs: new Map() };
+function syncOutros() {
+  if (!FBM() || !window.MCloud || !window.MCloud.db || !S.myTurmas) return;
+  const quero = new Set(S.myTurmas.filter(t => t.id !== S.turmaId).map(t => t.id));
+  for (const [t, off] of OUTROS.subs) if (!quero.has(t)) { try { off(); } catch (e) { } OUTROS.subs.delete(t); delete S.outros[t]; }
+  for (const t of quero) {
+    if (OUTROS.subs.has(t)) continue;
+    try {
+      const off = window.MCloud.db(t).collection('games').onSnapshot(snap => {
+        const jogos = {};
+        for (const d of snap.docs) { const x = d.data(); if (x && typeof x === 'object') jogos[d.id] = cleanGame(d.id, x); }
+        S.outros[t] = jogos; render();
+      }, () => { });
+      OUTROS.subs.set(t, off);
+    } catch (e) { }
+  }
+}
+function stopOutros() { for (const off of OUTROS.subs.values()) { try { off(); } catch (e) { } } OUTROS.subs.clear(); S.outros = {}; }
+function podeVerOutro(g) {
+  if (g.vis === 'privada') return g.allowed.includes(meId()) || g.createdBy === meId();
+  if (g.vis === 'amigos') return g.createdBy === meId() || isFriend(g.createdBy) || g.conf.includes(meId());
+  return true;
+}
+function jogosDeFora() {
+  const hoje = todayStr(), out = [];
+  for (const [t, jogos] of Object.entries(S.outros || {})) {
+    const info = (S.myTurmas || []).find(x => x.id === t) || { id: t };
+    for (const g of Object.values(jogos)) if (g.status !== 'encerrado' && g.date >= hoje && podeVerOutro(g)) out.push({ g, t, nome: nomeEspaco(info) });
+  }
+  return out.sort((a, b) => byDate(a.g, b.g));
+}
+function rowDeFora(x) {
+  const vou = x.g.conf.includes(meId());
+  return `<button class="item" data-act="abrirOutro" data-t="${esc(x.t)}" data-g="${esc(x.g.id)}"><div class="date-box"><b>${esc(x.g.date.slice(8, 10))}</b><span>${esc(MES_CURTO[Number(x.g.date.slice(5, 7)) - 1] || '')}</span></div><div class="item-main"><div class="item-title">${esc(fmtDay(x.g.date))}, ${esc(fmtTime(x.g.time))}</div><div class="item-sub">${esc(x.nome)}${x.g.place ? ' · ' + esc(x.g.place) : ''}</div></div>${vou ? '<span class="pill pill-done">Você vai</span>' : `<span class="pill">${x.g.conf.length} vão</span>`}</button>`;
+}
+const MES_CURTO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
 // ================= Novo jogo: uma pergunta só, "quem pode entrar" =================
 const NJ_ICON = {
   eu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>',
@@ -4113,7 +4159,7 @@ function startAbertos() {
 function stopAbertos() { for (const f of AB_W.feed) try { f(); } catch (e) { } AB_W.feed = []; for (const m of [AB_W.pedidos, AB_W.meus]) { for (const off of m.values()) try { off(); } catch (e) { } m.clear(); } }
 function syncAbertoWatchers() {
   if (!FBM() || !window.MCloud.watchPedidos) return;
-  const mine = new Set(Object.values(S.abertos).filter(a => a.createdBy === meId()).map(a => a.id));
+  const mine = new Set(Object.values(S.abertos).filter(a => a.createdBy === meId() || (a.turma === S.turmaId && isTurmaAdmin())).map(a => a.id));
   for (const [gid, off] of AB_W.pedidos) if (!mine.has(gid)) { try { off(); } catch (e) { } AB_W.pedidos.delete(gid); delete S.pedidosOrg[gid]; }
   for (const gid of mine) if (!AB_W.pedidos.has(gid)) AB_W.pedidos.set(gid, window.MCloud.watchPedidos(gid, list => { const m = {}; for (const x of list || []) if (x && x.uid) m[x.uid] = x; S.pedidosOrg[gid] = m; autoAprovar(gid); render(); if (S.ui.sheet) renderSheet(); }, () => { }));
   for (const gid of Object.keys(S.myPedidosIdx || {})) if (!AB_W.meus.has(gid)) AB_W.meus.set(gid, window.MCloud.watchPedido(gid, meId(), x => { if (x) S.pedidosMeus[gid] = x; else delete S.pedidosMeus[gid]; render(); }, () => { }));
@@ -5198,6 +5244,7 @@ const ACT = {
   njPasso: el => { const i = $('#' + el.dataset.alvo); if (!i) return; const lo = Number(i.min || 0), hi = Number(i.max || 99); i.value = clamp((parseInt(i.value, 10) || 0) + Number(el.dataset.d), lo, hi); },
   njGeo: async () => { const m = $('#njGeoMsg'); try { const p = await getGeo(); $('#abLat2').value = p.lat; $('#abLng2').value = p.lng; if (m) m.textContent = 'Quadra marcada no mapa. Quem procura jogo vê a distância.'; } catch (e) { if (m) m.textContent = 'Não consegui pegar a localização. Confira a permissão do navegador.'; } },
   gMais: el => { const b = $('#njMaisBox'); if (!b) return; b.hidden = !b.hidden; el.setAttribute('aria-expanded', String(!b.hidden)); el.textContent = b.hidden ? 'Mais opções' : 'Menos opções'; const q = (document.querySelector('[data-act="njQuem"][aria-checked="true"]') || {}).dataset; const vf = b.querySelector('#gVisMain'); if (vf) vf.closest('.field').hidden = !(q && q.v && q.v.startsWith('t:')); },
+  abrirOutro: el => { const t = el.dataset.t, g = el.dataset.g; if (!t || !g) return; S.openGameId = g; S.ui.tab = 'jogos'; S.ui.gameId = null; openTurma(t); },
   njFechar: () => { S.ui.recemCriado = null; render(); },
   njCopiar: async el => { const l = inviteLink(el.dataset.id); try { await navigator.clipboard.writeText(l); toast('Link copiado.'); } catch (e) { toast(l); } },
   saveGame: el => {
