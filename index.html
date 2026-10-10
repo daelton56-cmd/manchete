@@ -1270,6 +1270,7 @@ function cleanGame(id, d) {
     aberto: cleanAbertoCfg(d.aberto),
     galera: cleanGaleraPub(d.galera),
     placarRapido: d.placarRapido === true,
+    notasCriador: d.notasCriador === true,
     contest: cleanContest(d.contest)
   };
   const idxMap = o => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && v >= 0 && v <= 60) r[k] = Math.round(v); return r; };
@@ -1691,14 +1692,14 @@ function canCreate() { return S.canWrite && (!FBM() || (FB() && !!S.players[meId
 function isTurmaAdmin() { if (!FBM()) return S.canWrite; return !!(S.turma && (S.turma.admins || []).includes(meId())); }
 function canEditGame(g) { if (!S.canWrite) return false; if (!FBM()) return true; return !!g && (g.createdBy === meId() || isTurmaAdmin()); }
 function canEditPlayer(p) { if (!S.canWrite || !p) return false; if (!FBM()) return true; return p.id === meId() || (p.guest && (p.createdBy === meId() || isTurmaAdmin())); }
-function canEditNotes(p) { if (!FBM()) return true; if (!p) return false; if (p.guest) return canEditPlayer(p); return p.id === meId() && !p.n && !p.locked; }
+function canEditNotes(p) { if (!FBM()) return true; if (!p) return false; if (p.guest) return canEditPlayer(p); return p.id === meId() && !p.locked && (!p.n || !!p.rascunho); }
 // Quem já jogou uma partida que vale fica com as notas travadas também no banco.
 const LOCK_ASKED = new Set();
 function ensureLocks() {
   if (!FB() || !S.db || !S.db.lockCard) return;
   const d = D();
   for (const p of Object.values(S.players)) {
-    if (p.guest || !p.ownerUid || p.locked || LOCK_ASKED.has(p.id) || !(d.view[p.id] && d.view[p.id].n > 0)) continue;
+    if (p.guest || !p.ownerUid || p.locked || p.rascunho || LOCK_ASKED.has(p.id) || !(d.view[p.id] && d.view[p.id].n > 0)) continue;
     LOCK_ASKED.add(p.id);
     S.db.lockCard(p.id).catch(() => { });
   }
@@ -1953,13 +1954,16 @@ function authView() {
     ${isNew ? '' : '<button class="btn btn-block btn-ghost" data-act="resetPass">Esqueci a senha</button>'}
   </div>`;
 }
+const espacoDeAlguem = t => !!t && (t.pessoal === true || /^Jogos de /.test(t.name || ''));
+function nomeEspaco(t) { if (!t) return 'Turma'; if (espacoDeAlguem(t) && (!t.ownerUid || t.ownerUid === meId())) return 'Seus jogos'; return t.name || 'Turma'; }
 function myTurmasList(currentId) {
   const list = S.myTurmas;
   if (list == null) return '<p class="sub small">Carregando suas turmas…</p>';
   if (!list.length) return '<p class="sub small">Você ainda não está em nenhuma turma.</p>';
   return listBox(list.map(t => {
-    const role = t.ownerUid === meId() ? 'Você criou' : ((t.admins || []).includes(meId()) ? 'Admin' : 'Membro');
-    return `<div class="pres"><div class="item-main"><div class="item-title">${esc(t.name || 'Sem nome')}</div><div class="item-sub">${role}</div></div>${t.id === currentId ? '<span class="pill pill-done">Aberta</span>' : `<button class="btn btn-sm" data-act="switchTurma" data-t="${esc(t.id)}">Abrir</button>`}</div>`;
+    const pessoal = espacoDeAlguem(t), meu = pessoal && (!t.ownerUid || t.ownerUid === meId());
+    const role = pessoal ? (meu ? 'Os jogos que você marcou sem turma' : 'Jogos em que te chamaram') : t.ownerUid === meId() ? 'Você criou' : ((t.admins || []).includes(meId()) ? 'Admin' : 'Membro');
+    return `<div class="pres"><div class="item-main"><div class="item-title">${esc(nomeEspaco(t))}</div><div class="item-sub">${role}</div></div>${t.id === currentId ? '<span class="pill pill-done">Aberta</span>' : `<button class="btn btn-sm" data-act="switchTurma" data-t="${esc(t.id)}">Abrir</button>`}</div>`;
   }));
 }
 function noTurmaView() {
@@ -2144,7 +2148,7 @@ function rankingView() {
   const avg = p => p.tot.notaN ? p.tot.notaSum / p.tot.notaN : -1;
   const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), vit: (a, b) => pct(b) - pct(a) || b.tot.sets - a.tot.sets || ovrOf(b) - ovrOf(a), nota: (a, b) => avg(b) - avg(a) || ovrOf(b) - ovrOf(a) };
   let h = banners();
-  if (social) h += `<div class="seg seg-full" style="grid-template-columns:1fr 1fr;margin-top:14px" role="group" aria-label="Quem entra no ranking"><button data-act="rankScope" data-v="turma" aria-pressed="${scope === 'turma'}">Turma</button><button data-act="rankScope" data-v="amigos" aria-pressed="${scope === 'amigos'}">Amigos</button></div>`;
+  if (social) h += `<div class="seg seg-full" style="grid-template-columns:1fr 1fr;margin-top:14px" role="group" aria-label="Quem entra no ranking"><button data-act="rankScope" data-v="turma" aria-pressed="${scope === 'turma'}">Turma</button><button data-act="rankScope" data-v="amigos" aria-pressed="${scope === 'amigos'}">Amigos aqui</button></div>`;
   const chip = (k, l) => `<button class="chip" data-act="rankSort" data-sort="${k}" aria-pressed="${sort === k}">${l}</button>`;
   h += `<div class="chips-line" style="margin:12px 0 4px">${chip('ovr', 'Geral')}${chip('vit', 'Vitórias')}${chip('nota', 'Notas')}</div>`;
   if (!ps.length) return h + `<div class="empty" style="margin-top:16px"><h3>Ranking vazio</h3><p class="sub">${scope === 'amigos' ? 'Quando você tiver amigos no app, eles aparecem aqui.' : 'O ranking aparece quando o elenco tiver jogadores.'}</p></div>`;
@@ -2258,7 +2262,7 @@ function presencaStep(g, confN) {
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
     <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
     ${on && !W && FB() && privacyOn() && canFriend(p.id) && friendState(p.id) !== 'friend' ? friendBtn(p.id) : ''}
-    ${on && W ? `<button class="paid paid-ic" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(p.nick || p.name)} pagou">${g.paid.includes(p.id) ? CHECK_SVG : 'R$'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
+    ${on && W && cobraNoJogo(g) ? `<button class="paid paid-ic" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(p.nick || p.name)} pagou">${g.paid.includes(p.id) ? CHECK_SVG : 'R$'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
     ${W || (FB() && p.id === meId()) ? `${p.id === meId() ? `<button class="toggle tg-me" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Desmarcar' : 'Vou'}</button>` : `<button class="toggle tg-ic" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}" aria-label="${on ? 'Desmarcar' : 'Confirmar'} ${esc(p.nick || p.name)}"><span class="tg-c">${on ? CHECK_SVG : ''}</span><span class="sr">${on ? 'Vai' : 'Confirmar'}</span></button>`}` : ''}
   </div>`;
   if (conf.length) h += listBox(conf.map((id, i) => row(P(id), i, true)));
@@ -2444,6 +2448,7 @@ function finalView(g) {
   const res = resultOf(g) || (pend && hasResult(g) ? computeResult(g, D().view) : null) || { players: {}, awards: [], mvp: null };
   const rows = res.players;
   let h = gameHead(g) + confirmBox(g);
+  h += completarCartaHTML();
   h += `<div class="board" style="padding:16px"><div class="board-label">Resultado</div><div class="board-day" style="font-size:30px;margin-top:4px">${esc(scoreline(g) || 'Sem placar')}</div>
     <div class="board-place" style="margin:6px 0 0">${g.placarRapido ? '' : g.sets.filter(s => s.pa != null && s.pb != null).map(s => `${s.pa}–${s.pb}`).join(', ')}</div></div>`;
   if (pend) h += `<p class="sub small" style="margin-top:12px">Prévia: é assim que as cartas vão ficar quando o placar valer.</p>`;
@@ -2613,7 +2618,8 @@ function repeatField(g, last) {
     <p class="sub small" style="margin-top:8px">O jogo da semana seguinte aparece sozinho, no mesmo dia e horário, depois que este passar. Para pular uma semana, é só mudar a data.</p></div>`;
 }
 function whereField() {
-  const list = (S.myTurmas && S.myTurmas.length ? S.myTurmas : [{ id: S.turmaId, name: (S.turma && S.turma.name) || 'Turma' }]);
+  const reais = typeof turmasDeVerdade === 'function' ? turmasDeVerdade() : [];
+  const list = reais.length ? reais : (S.myTurmas && S.myTurmas.length ? S.myTurmas : [{ id: S.turmaId, name: (S.turma && S.turma.name) || 'Turma' }]);
   const nome = t => (t.pessoal || /^Jogos de /.test(t.name || '')) && (t.ownerUid ? t.ownerUid === meId() : true) ? 'Só meu jogo' : (t.name || 'Turma');
   return `<div class="field"><span>Onde</span><div class="row-wrap">${list.map(t => `<button class="chip" data-act="gWhere" data-t="${esc(t.id)}" aria-pressed="${t.id === S.turmaId}">${esc(nome(t))}</button>`).join('')}</div>
     <p class="sub small" id="gWhereHint" style="margin-top:8px" hidden></p></div>`;
@@ -3621,6 +3627,8 @@ function porqueHTML(g, pid) {
   notas.push('Nota acima da média do jogo sobe a carta, abaixo desce. Vitória sobe, derrota desce.');
   return h + `<p class="sub small" style="margin-top:10px">${notas.join(' ')}</p>`;
 }
+// "Pagou?" só aparece quando há o que cobrar: jogo aberto com valor, ou turma que já marca quem pagou.
+const cobraNoJogo = g => !FBM() || g.paid.length > 0 || !!(g.aberto && g.aberto.preco && ((g.aberto.preco.valor || 0) > 0 || (g.aberto.preco.custo || 0) > 0)) || Object.values(S.games).some(x => x.paid && x.paid.length > 0);
 function cartaTxt(dd) {
   if (dd == null) return '';
   if (dd >= 0.05) return `<span class="nt-d up">carta ↑ ${fmtN(dd)}</span>`;
@@ -3731,7 +3739,7 @@ function novoJogoHTML() {
   ${lugares.length ? `<div class="nj-mini">${lugares.map(p => `<button class="mc nj-lugar" data-act="njLugar" data-v="${esc(p)}">${esc(p)}</button>`).join('')}</div>` : ''}
   <div class="nj-lb">Quem pode entrar</div>
   <div class="nj-opts" role="radiogroup" aria-label="Quem pode entrar">
-    ${opt('eu', NJ_ICON.eu, 'Só quem eu chamar', 'Você manda o link pelo WhatsApp.')}
+    ${opt('eu', NJ_ICON.eu, 'Só quem eu chamar', 'Você manda o link pelo WhatsApp. Quem já jogou com você também vê.')}
     ${turmasDeVerdade().map(t => opt('t:' + t.id, NJ_ICON.turma, t.name || 'Turma', 'A turma toda vê e confirma.')).join('')}
     ${opt('aberto', NJ_ICON.aberto, 'Aberto ao público', 'Aparece para quem joga perto. Você aprova quem pede vaga.')}
   </div>
@@ -3747,7 +3755,7 @@ function novoJogoHTML() {
   <div class="nj-card"><span class="nj-rt">Repetir toda semana</span><button class="nj-sw" data-act="gRepeat" aria-pressed="${!!(last && last.repeat)}" aria-label="Repetir toda semana"></button></div>
   <label class="field"><span>Observação</span><input class="input" type="text" id="fNote" maxlength="300" placeholder="Opcional: levar bola, valor da quadra"></label>
   <button class="link-btn quiet nj-mais-btn" data-act="gMais" aria-expanded="false">Mais opções</button>
-  <div id="njMaisBox" hidden>${turmasDeVerdade().length ? visField(null, true) : ''}${(S.myTurmas || []).length > 1 ? `<p class="sub small" style="margin:10px 0 6px">Jogo entre turmas: marque mais de uma e ele vira amistoso, que não mexe nas cartas.</p>${whereField()}` : ''}</div>
+  <div id="njMaisBox" hidden>${turmasDeVerdade().length ? visField(null, true) : ''}${turmasDeVerdade().length > 1 ? `<p class="sub small" style="margin:10px 0 6px">Jogo entre turmas: marque mais de uma e ele vira amistoso, que não mexe nas cartas.</p>${whereField()}` : ''}</div>
   <div id="fErr" class="err" role="alert"></div>
   <button class="btn btn-block btn-ball nj-go" data-act="saveGame" data-id="">Marcar jogo</button>
   </div>`;
@@ -3793,7 +3801,7 @@ async function salvarNovoJogo(el) {
   try { if (!dest) dest = await garantirEspaco(); }
   catch (e) { el.disabled = false; err.textContent = 'Não consegui preparar o seu jogo. Confira a internet e tente de novo.'; return; }
   const last = Object.values(S.games).sort(byDate).pop(), gid = uid('g');
-  const g = cleanGame(gid, { date, time, max, place, note, vis, allowed, created: Date.now(), createdBy: meId(), track: last ? last.track : ['saq', 'rec'], nTeams: 2, repeat: rep, serie: rep ? gid : '', seq: rep ? 1 : 0, aberto });
+  const g = cleanGame(gid, { date, time, max, place, note, vis, allowed, created: Date.now(), createdBy: meId(), notasCriador: true, track: last ? last.track : ['saq', 'rec'], nTeams: 2, repeat: rep, serie: rep ? gid : '', seq: rep ? 1 : 0, aberto });
   S.ui.recemCriado = g.id;
   if (dest === S.turmaId) {
     S.games[g.id] = g; persist('games', g.id);
@@ -3882,7 +3890,7 @@ function notasFecha(g) { const d = new Date(notasAbre(g)); const day = `${d.getF
 const notaDocId = (g, u) => `nt_${g.id}_${u}`;
 function notasDe(g, u) { const d = S.notasDocs[notaDocId(g, u)]; return d && d.n && typeof d.n === 'object' ? d.n : {}; }
 const notasDone = (g, u) => !!(S.notasDocs[notaDocId(g, u)] || {}).done;
-const todosVotaram = g => { const vs = votantes(g); return isTurmaAdmin() && vs.length >= 2 && vs.every(u => notasDone(g, u)); };
+const todosVotaram = g => { const vs = votantes(g); return (isTurmaAdmin() || (g.notasCriador && g.createdBy === meId())) && vs.length >= 2 && vs.every(u => notasDone(g, u)); };
 function notasEstado(g) {
   if (!FBM() || !g || participantes(g).length < 2) return 'nada';
   if (g.galera && g.galera.fechado) return 'publicada';
@@ -3916,8 +3924,9 @@ function calcNotas(g) {
 // O app de qualquer admin publica sozinho quando a votação fecha, ou quando todo mundo já votou.
 const NT_PUB = new Set();
 function ensureNotas() {
-  if (!FBM() || !isTurmaAdmin() || !S.firmData) return;
+  if (!FBM() || !S.firmData) return;
   for (const g of Object.values(S.games)) {
+    if (!(isTurmaAdmin() || (g.notasCriador && g.createdBy === meId()))) continue;
     if (NT_PUB.has(g.id) || notasEstado(g) !== 'fechada') continue;
     NT_PUB.add(g.id);
     g.galera = calcNotas(g); persist('games', g.id); dirty(); render();
@@ -3927,7 +3936,7 @@ let NT_T = null;
 function salvarNotas(g, done) {
   const me = meId(), id = notaDocId(g, me), d0 = S.notasDocs[id];
   const n = Object.assign({}, notasDe(g, me), S.notasMine[g.id] || {});
-  const data = { kind: 'notas', turma: S.turmaId, gid: g.id, createdBy: me, visibleTo: [...new Set([me, ...((S.turma && S.turma.admins) || [])])], n, done: !!(done || (d0 && d0.done)), updated: Date.now() };
+  const data = { kind: 'notas', turma: S.turmaId, gid: g.id, createdBy: me, visibleTo: [...new Set([me, ...((S.turma && S.turma.admins) || []), ...(g.notasCriador && g.createdBy ? [g.createdBy] : [])])], n, done: !!(done || (d0 && d0.done)), updated: Date.now() };
   S.notasDocs[id] = Object.assign({ id }, d0 || {}, data);
   return d0 && d0.created ? window.MCloud.partidaSave(id, data) : window.MCloud.partidaCreate(id, Object.assign({ votes: {}, conf: [], created: Date.now() }, data)).then(() => { S.notasDocs[id].created = Date.now(); });
 }
@@ -4029,7 +4038,7 @@ function jogoStep(g) {
   if (W && g.status === 'encerrado') h += `<button class="btn btn-block btn-ball" style="margin-top:12px" data-act="verResultado">Ver resultado</button><p class="sub small" style="text-align:center;margin-top:8px">O jogo já está encerrado. O que você mudar aqui fica salvo e as cartas se ajustam.</p>`;
   else if (W) h += `<button class="btn btn-block btn-ball" style="margin-top:12px;min-height:56px;font-size:17px" data-act="encerrarJogo">Encerrar o jogo</button><p class="sub small" style="text-align:center;margin-top:8px">Se ninguém encerrar, a votação abre sozinha às ${new Date(startTs(g) + 3 * 3600e3).getHours()}h.</p>`;
   else h += '<p class="sub" style="margin-top:12px">Quem marcou encerra o jogo. Depois, todo mundo que jogou dá as notas da galera.</p>';
-  h += `<div class="row" style="justify-content:center;gap:18px;margin-top:6px"><button class="link-btn quiet" data-act="step" data-step="placar">Placar por set</button><button class="link-btn quiet" data-act="step" data-step="sumula">Anotar lances (súmula)</button></div>`;
+  h += `<div class="row" style="justify-content:center;gap:18px;margin-top:6px"><button class="link-btn quiet" data-act="step" data-step="placar">Placar por set</button>${g.log.length || Object.values(S.games).some(x => x.log && x.log.length) ? '<button class="link-btn quiet" data-act="step" data-step="sumula">Anotar lances (súmula)</button>' : ''}</div>`;
   return h;
 }
 
@@ -5499,7 +5508,7 @@ const ACT = {
   editPlayer: el => {
     const p = P(el.dataset.pid); if (!p || !canEditPlayer(p)) return;
     const self = FBM() && p.id === meId();
-    const notes = !FBM() || p.guest ? 'adj' : (p.n || p.locked ? 'locked' : 'base');
+    const notes = !FBM() || p.guest ? 'adj' : (p.rascunho && !p.locked ? 'base' : (p.n || p.locked ? 'locked' : 'base'));
     S.ui.form = { pid: p.id, kind: self ? 'self' : (p.guest ? 'guest' : 'player'), notes, max: notes === 'base' ? 80 : 99, pos: p.pos, pos2: (p.pos2 || []).slice(), level: p.level, at: { ...p.at }, start: { ...p.at }, photo: p.photo };
     openSheet({ type: 'playerForm' });
   },
@@ -5569,7 +5578,7 @@ const ACT = {
       else { S.games[gid].conf.push(p.id); persist('games', gid); }
     }
     closeSheet(); render();
-    toast(f.kind === 'self' ? `Sua carta está no elenco: ${ovrOf(P(p.id))}.` : `Carta de ${p.nick || p.name} criada: ${ovrOf(P(p.id))}.`);
+    toast(f.kind === 'self' ? 'Carta pronta.' : `Carta de ${p.nick || p.name} criada: ${ovrOf(P(p.id))}.`);
     if (f.kind === 'self') maybeTour();
   },
   askDeletePlayer: el => {
