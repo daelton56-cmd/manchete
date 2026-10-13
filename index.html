@@ -4266,7 +4266,7 @@ function abrirHTML(g) {
   const opt = (v, t, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(t)}</option>`;
   return `<input type="hidden" id="abLat" value="${a.lat ?? ''}"><input type="hidden" id="abLng" value="${a.lng ?? ''}">
   <div class="field"><span>Quem vê</span><div class="seg seg-full" style="grid-template-columns:1fr 1fr"><button data-act="abVis" data-v="todos" aria-pressed="${a.vis !== 'rede'}">Todo mundo do app</button><button data-act="abVis" data-v="rede" aria-pressed="${a.vis === 'rede'}">Só a minha rede</button></div></div>
-  <div class="grid2"><label class="field"><span>Vagas para abrir</span><input class="input" id="abVagas" inputmode="numeric" value="${a.vagas}"></label><label class="field"><span>Nível</span><select class="input" id="abNivel">${Object.entries(NIVEIS).map(([k, v]) => opt(k, v, a.nivel)).join('')}</select></label></div>
+  <div class="grid2"><label class="field"><span>Vagas para abrir</span><input class="input" id="abVagas" inputmode="numeric" value="${a.vagas}"></label><div class="field"><span>Nível</span><input type="hidden" id="abNivel" value="${esc(a.nivel)}"><div class="nj-mini" role="group" aria-label="Nível do jogo">${Object.entries(NIVEIS).map(([k, v]) => `<button class="mc" data-act="abNivelChip" data-v="${k}" aria-pressed="${k === a.nivel}">${esc(k === 'int' ? 'Médio' : v)}</button>`).join('')}</div></div></div>
   <div class="field"><span>Valor por pessoa</span><div class="seg seg-full" style="grid-template-columns:1fr 1fr"><button data-act="abModo" data-v="fixo" aria-pressed="${a.preco.modo !== 'rateio'}">Fixo</button><button data-act="abModo" data-v="rateio" aria-pressed="${a.preco.modo === 'rateio'}">Rateio da quadra</button></div></div>
   <div id="abFixo" ${a.preco.modo === 'rateio' ? 'hidden' : ''}><label class="field"><span>Valor (R$)</span><input class="input" id="abValor" inputmode="decimal" value="${a.preco.valor || ''}" placeholder="Ex.: 15"></label></div>
   <div id="abRateio" ${a.preco.modo === 'rateio' ? '' : 'hidden'}><div class="grid2"><label class="field"><span>Custo da quadra (R$)</span><input class="input" id="abCusto" inputmode="decimal" value="${a.preco.custo || ''}" placeholder="Ex.: 180"></label><label class="field"><span>Mínimo para jogar</span><input class="input" id="abMin" inputmode="numeric" value="${a.preco.minimo || ''}" placeholder="Ex.: 8"></label></div><p class="sub small" id="abPrev" style="margin-top:-4px"></p></div>
@@ -4386,6 +4386,8 @@ function confOrder(g) {
 const pagoId = (t, pid) => `pg_${t}_${pid}`;
 const pagoOf = pid => S.pagos[pagoId(S.turmaId, pid)] || null;
 function payState(pid, key) {
+  // Quem recebe os pagamentos já está com a própria parte: conta como pago, e o total do mês não muda.
+  if (pid && payCfg().recebedor && payCfg().recebedor === pid) return { st: 'pago', at: 1, claim: 0 };
   const d = pagoOf(pid); let mark = null, claim = 0;
   for (const [u, e] of Object.entries((d && d.roster) || {})) {
     if (!e || typeof e !== 'object') continue;
@@ -5278,6 +5280,7 @@ const ACT = {
   njPasso: el => { const i = $('#' + el.dataset.alvo); if (!i) return; const lo = Number(i.min || 0), hi = Number(i.max || 99); i.value = clamp((parseInt(i.value, 10) || 0) + Number(el.dataset.d), lo, hi); },
   njGeo: async () => { const m = $('#njGeoMsg'); try { const p = await getGeo(); $('#abLat2').value = p.lat; $('#abLng2').value = p.lng; if (m) m.textContent = 'Quadra marcada no mapa. Quem procura jogo vê a distância.'; } catch (e) { if (m) m.textContent = 'Não consegui pegar a localização. Confira a permissão do navegador.'; } },
   gMais: el => { const b = $('#njMaisBox'); if (!b) return; b.hidden = !b.hidden; el.setAttribute('aria-expanded', String(!b.hidden)); el.textContent = b.hidden ? 'Mais opções' : 'Menos opções'; const q = (document.querySelector('[data-act="njQuem"][aria-checked="true"]') || {}).dataset; const vf = b.querySelector('#gVisMain'); if (vf) vf.closest('.field').hidden = !(q && q.v && q.v.startsWith('t:')); },
+  abNivelChip: el => { $('#abNivel').value = el.dataset.v; el.parentElement.querySelectorAll('[data-act="abNivelChip"]').forEach(b => b.setAttribute('aria-pressed', String(b === el))); },
   abrirOutro: el => { const t = el.dataset.t, g = el.dataset.g; if (!t || !g) return; S.openGameId = g; S.ui.tab = 'jogos'; S.ui.gameId = null; openTurma(t); },
   njFechar: () => { S.ui.recemCriado = null; render(); },
   njCopiar: async el => { const l = inviteLink(el.dataset.id); try { await navigator.clipboard.writeText(l); toast('Link copiado.'); } catch (e) { toast(l); } },
