@@ -666,6 +666,11 @@ input[type=date].input::-webkit-datetime-edit,input[type=time].input::-webkit-da
 .btn.nj-wa{background:#1F8A4C; color:#fff}
 
 .lj-vou{min-height:60px; font-size:20px; margin-top:16px}
+
+/* auditoria: nomes não são cortados nas listas e o seletor de turma tem altura de toque */
+.turma-switch{min-height:44px; padding-top:6px; padding-bottom:6px}
+.btn-danger-soft{background:#FDECEC; color:#B42318}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .btn-danger-soft{background:#3A1F1F; color:#FFB4AB} }
 @media (prefers-reduced-motion:reduce){
   .sheet, .sheet-bg{animation:none}
   .btn, .chip, .toggle, .card-btn, .item{transition:none}
@@ -1783,7 +1788,7 @@ function gameRow(g) {
   const mvp = res && res.mvp && P(res.mvp) ? nameOf(res.mvp) : null;
   const past = g.date < todayStr();
   const pill = canConfirm(g) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Confirme o placar</span>' : needsMyVote(g) ? '<span class="pill" style="background:var(--ball);color:var(--ball-ink)">Vote no MVP</span>' : pendingConfirm(g) ? '<span class="pill">Falta confirmar</span>' : g.status === 'encerrado' ? '<span class="pill pill-done">Encerrado</span>' : res ? '<span class="pill">Placar lançado</span>' : (past ? '<span class="pill">Sem placar</span>' : `<span class="pill">${plural(g.conf.filter(P).length, 'confirmado', 'confirmados')}</span>`);
-  const sub = (visLabel(g) ? visLabel(g) + '. ' : '') + (sl ? esc(sl) + (mvp ? `<br>MVP: ${esc(mvp)}` : '') : esc(g.place || 'Local a definir'));
+  const sub = (visLabel(g) ? visLabel(g) + '. ' : '') + (sl ? esc(sl) + (mvpDoJogo(g, mvp) ? `<br>MVP: ${esc(mvpDoJogo(g, mvp))}` : '') : esc(g.place || 'Local a definir'));
   return `<button class="item" data-act="openGame" data-id="${esc(g.id)}">
     <div class="date-box"><b>${d.getDate()}</b><span>${MESES[d.getMonth()]}</span></div>
     <div class="item-main"><div class="item-title">${DIAS[d.getDay()]}, ${fmtTime(g.time)}</div><div class="item-sub">${sub}</div></div>
@@ -2132,7 +2137,7 @@ function elencoView() {
   let h = banners() + searchBoxHTML();
   if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${mine.n ? `${plural(mine.tot.jogos, 'jogo', 'jogos')}, ${mine.tot.sets ? Math.round(100 * mine.tot.setsV / mine.tot.sets) + '% dos sets ganhos' : 'sem sets ainda'}` : 'Ainda sem jogos com placar.'}</div><button class="btn btn-sm" style="margin-top:10px" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar</button></div></div>`;
   if (!ps.length) {
-    return h + `<div class="empty" style="margin-top:16px"><h3>${FB() ? 'Só você por aqui' : 'Ninguém no elenco'}</h3><p class="sub">${FB() ? 'Mande o link da turma para a galera. Cada um cria a própria carta.' : 'Cadastre cada jogador com uma nota de 40 a 90 em cada fundamento. A carta nasce daí e evolui a cada jogo.'}</p>${FB() ? `<div class="row-wrap"><button class="btn btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${mine ? `<button class="btn" data-act="newGuest">${ICON.plus}Convidado sem conta</button>` : ''}</div>` : (S.canWrite ? `<button class="btn btn-ball" data-act="newPlayer">${ICON.plus}Novo jogador</button>` : '')}</div>`;
+    return h + `<div class="empty" style="margin-top:16px"><h3>${FB() ? 'Só você por aqui' : 'Ninguém no elenco'}</h3><p class="sub">${FB() ? 'Mande o link da turma para a galera. Cada um cria a própria carta.' : 'Cadastre cada jogador com uma nota de 40 a 90 em cada fundamento. A carta nasce daí e evolui a cada jogo.'}</p>${FB() ? `<div class="row-wrap"><button class="btn btn-ball" data-act="shareInvite">${ICON.copy}Convidar para a turma</button>${mine ? `<button class="btn" data-act="newGuest">${ICON.plus}Convidado sem conta</button>` : ''}</div>` : (S.canWrite ? `<button class="btn btn-ball" data-act="newPlayer">${ICON.plus}Novo jogador</button>` : '')}</div>`;
   }
   const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), nome: (a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'), pos: (a, b) => Object.keys(POS).indexOf(a.pos) - Object.keys(POS).indexOf(b.pos) || ovrOf(b) - ovrOf(a) };
   ps.sort(sorters[S.ui.sort] || sorters.ovr);
@@ -2391,7 +2396,10 @@ function whyLines(r) {
   if (r.galera) out.push(`Nota da galera ${fmtN(r.galera.avg)} de 5, com ${r.galera.n} notas: ${r.galera.d >= 0 ? '+' : '−'}${fmtN(Math.abs(r.galera.d))} em cada fundamento.`);
   return out;
 }
+function mvpDoJogo(g, reserva) { const m = g && g.galera && g.galera.mvp; return m && (P(m) || personName(m)) ? nameOf(m) : reserva; }
 function reportBody(rows, mvp, awards, ctx) {
+  const comGalera = (() => { const ga = S.games[S.ui.gameId]; return !!(FBM() && ga && ga.galera); })();
+  { const ga = S.games[S.ui.gameId]; if (FBM() && ga && ga.galera && ga.galera.mvp) mvp = null; }
   const ids = Object.keys(rows).sort((a, b) => ((rows[b].nota ?? -1) - (rows[a].nota ?? -1)) || ((rows[b].ovrAfter - rows[b].ovrBefore) - (rows[a].ovrAfter - rows[a].ovrBefore)));
   let h = '';
   if (mvp && P(mvp) && rows[mvp]) {
@@ -2400,17 +2408,17 @@ function reportBody(rows, mvp, awards, ctx) {
   }
   const aw = (awards || []).filter(a => a.key !== 'mvp' && P(a.pid));
   if (aw.length) h += section('Prêmios', `<div class="awards">${aw.map(a => `<div class="award"><div class="item-main"><b>${esc(a.name)}</b><div class="sub">${esc(nameOf(a.pid))}</div></div><span class="num" style="font-size:22px">${a.key === 'evoluiu' ? '+' + fmtN(a.val) : a.val}</span><span class="sub small">${esc(a.unit)}</span></div>`).join('')}</div>`);
-  h += section('Jogadores', listBox(ids.map(id => {
+  h += section(comGalera ? 'Como ficaram as cartas' : 'Jogadores', listBox(ids.map(id => {
     const r = rows[id];
     const d = r.ovrAfter - r.ovrBefore;
     const open = S.ui.openRep === id;
     return `<button class="rep" data-act="repToggle" data-pid="${esc(id)}" data-ctx="${ctx}" aria-expanded="${open}">
       <span class="team-dot" style="background:${(TEAMS[r.team] || TEAMS[0]).c}"></span>
-      <span class="nota ${id === mvp ? 'hi' : ''}">${r.nota == null ? '–' : fmtN(r.nota)}</span>
+      ${comGalera ? '' : `<span class="nota ${id === mvp ? 'hi' : ''}">${r.nota == null ? '–' : fmtN(r.nota)}</span>`}
       <span class="item-main"><span class="item-title" style="display:block">${esc(nameOf(id))}</span><span class="item-sub">${r.ovrBefore} → ${r.ovrAfter}${r.galera ? `, galera ${fmtN(r.galera.avg)}` : ''}</span></span>
       <span class="delta ${d > 0 ? 'up' : d < 0 ? 'down' : 'eq'}">${d > 0 ? '+' + d : d < 0 ? '−' + Math.abs(d) : '='}</span>
     </button>${open ? `<div class="rep-detail">${r.sets ? whyLines(r).map(l => `<div>${esc(l)}</div>`).join('') : '<div>Não jogou nenhum set registrado.</div>'}</div>` : ''}`;
-  })), `<p class="sub small" style="margin:-4px 0 10px">Nota de 0 a 10 pelo que foi anotado, pelos sets vencidos e pela nota da galera. Toque num jogador para ver por que a carta mudou.</p>`);
+  })), `<p class="sub small" style="margin:-4px 0 10px">${comGalera ? 'Antes e depois deste jogo. Toque em alguém para ver por que a carta mudou.' : 'Nota de 0 a 10 pelo que foi anotado, pelos sets vencidos e pela nota da galera. Toque num jogador para ver por que a carta mudou.'}</p>`);
   return h;
 }
 function rateOpen(g) { return FBM() && hasResult(g) && voters(g).includes(meId()) && todayStr() <= voteCloseDate(g); }
@@ -2476,9 +2484,9 @@ function renderSheet() {
   if (!s) return closeSheet();
   let title = '', body = '';
   if (s.type === 'help') { title = 'Como funciona'; body = helpHTML(); }
-  else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = !s.id && FB() ? novoJogoHTML() : gameFormHTML(s.id); }
+  else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = !s.id && FB() ? novoJogoHTML() : (s.id && FB() && S.games[s.id] ? editarJogoHTML(s.id) : gameFormHTML(s.id)); }
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
-  else if (s.type === 'perfil') { title = espacoPessoal() ? 'Você' : 'Você e a turma'; body = `<button class="btn btn-block btn-ball" style="margin-bottom:14px" data-act="convidarAmigos">Convidar amigos</button>` + perfilHTML(); }
+  else if (s.type === 'perfil') { title = espacoPessoal() ? 'Você' : 'Você e a turma'; body = `<button class="btn btn-block" style="margin-bottom:14px" data-act="convidarAmigos">${ICON.plus}Adicionar amigos</button>` + perfilHTML(); }
   else if (s.type === 'convidarAmigos') { title = 'Convidar amigos'; body = convidarAmigosHTML(); }
   else if (s.type === 'amigoConvite') { const a = S.amigoConvite; if (!a) return closeSheet(); title = 'Convite de amizade'; body = `<p class="sub" style="margin:-4px 0 14px">${esc(a.de || 'Alguém')} te convidou para ser amigo no Manchete. Amigos veem os jogos uns dos outros e aparecem juntos no ranking.</p><button class="btn btn-block btn-ball" data-act="amigoAceitar">Adicionar ${esc(a.de || 'como amigo')}</button><button class="btn btn-block btn-ghost" style="margin-top:8px" data-act="closeSheet">Agora não</button>`; }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
@@ -2549,20 +2557,19 @@ function renderSheet() {
 }
 function helpHTML() {
   const tiers = TIERS.map((t, i) => `<div class="t-${t.key}">${t.name}<br>${t.min || 'até 64'}${i < TIERS.length - 1 ? (t.min ? '–' + (TIERS[i + 1].min - 1) : '') : '+'}</div>`).join('');
+  const pay = FBM() && payCfg().on;
   return `<div class="help">
   ${FB() && P(meId()) ? '<button class="btn btn-block" data-act="tourAgain" style="margin-bottom:14px">Ver o tutorial de novo</button>' : ''}
-  <p>Cada jogador tem uma carta. O número grande é o geral, que junta a técnica (70%) e a forma (30%).</p>
-  <h3>Técnica</h3><p>São os seis fundamentos: saque, recepção, levantamento, ataque, bloqueio e defesa. Cada posição pesa os fundamentos de um jeito. No levantador, o levantamento vale 45% da técnica. No central, o bloqueio vale 35%.</p>
-  <p>No cadastro você escolhe o nível de entrada, iniciante, experiente ou avançado, e as notas já vêm de acordo com a posição. Depois é só ajustar cada fundamento de 40 a 90, arrastando ou digitando. Passar de 90 e chegar a Lenda só jogando.</p>
-  <h3>Calibração</h3><p>O nível de entrada é um chute, então nos 5 primeiros jogos a carta anda mais rápido: no primeiro, o dobro do normal. Depois disso ela firma. Enquanto isso a carta mostra "em calibração".</p>
-  <h3>Como a súmula mexe na carta</h3><p>No jogo você escolhe o que vai anotar e toca no jogador e no lance. No fim, o app calcula o saldo de cada um por set e compara com o esperado para o nível da carta. Quem foi melhor que o esperado sobe, quem foi pior desce. Por isso um 90 que erra um saque por set desce, e um 60 que erra o mesmo tanto mexe pouco.</p>
-  <p>Só os fundamentos anotados naquele jogo mudam. Um fundamento mexe no máximo 4 pontos por jogo, e fica mais difícil subir perto do 99.</p>
-  <h3>Forma</h3><p>Vem do placar dos sets. Ganhar de um time mais forte rende mais do que ganhar de um mais fraco, e lavada conta um pouco mais que set apertado. O que um time ganha, o outro perde, então a média da galera não infla.</p>
+  <p>Cada pessoa tem uma carta. O número grande é o geral, e os seis menores são os fundamentos: saque, recepção, levantamento, ataque, bloqueio e defesa. A posição define quanto cada fundamento pesa no geral.</p>
+  <h3>Como a carta nasce</h3><p>No cadastro você escolhe a posição e o nível de entrada, e as notas já vêm de acordo. Dá para ajustar cada fundamento de 40 a 90, arrastando ou digitando. Passar de 90 só jogando. Quem entra por um link de jogo recebe uma carta provisória e pode completar depois, mesmo já tendo jogado.</p>
+  <h3>Como a carta muda</h3><p>${FBM() ? 'Duas coisas mexem na carta depois de cada jogo: o placar e as notas da galera. Ganhar sobe e perder desce, e ganhar de um time mais forte rende mais. Quando há notas, o placar pesa a metade. A nota puxa na direção certa: acima da média do jogo, a carta só sobe; abaixo, só desce.' : 'O placar mexe na carta: ganhar sobe e perder desce, e ganhar de um time mais forte rende mais. A súmula, se for usada, ajusta os fundamentos anotados.'} A carta muda no máximo 2 pontos por jogo. Para ver de onde veio cada parte, toque em alguém no resultado do jogo: aparece "Por que a carta mudou".</p>
+  ${FBM() ? '<h3>Notas da galera</h3><p>Quando o jogo é encerrado, quem jogou dá uma nota de 0 a 10 para cada um, uma pessoa por tela, sem votar em si. Ninguém vê a nota dos outros. A votação fecha às 23h do dia seguinte, ou antes, se todo mundo votar. O resultado sai sozinho quando um admin ou quem criou o jogo abre o app, e o MVP é quem teve a maior nota.</p>' : ''}
+  <h3>Calibração</h3><p>O nível de entrada é um chute, então nos 5 primeiros jogos a carta anda mais rápido. Enquanto isso ela mostra "em calibração".</p>
   <h3>Cores</h3><div class="tiers">${tiers}</div><p>A carta laranja é o destaque: o MVP do último jogo fica com ela até o próximo.</p>
-  <h3>Sorteio</h3><p>Com até 16 jogadores em 2 times, o app testa todas as divisões e escolhe uma das mais equilibradas pela média do geral. Com mais times, ele monta em cobrinha e testa trocas. Também evita juntar os levantadores e os centrais no mesmo time, e quem também joga em outra posição ajuda a cobrir o time que ficou sem levantador.</p>
-  <h3>No dia do jogo</h3><p>Se a galera montou a lista no WhatsApp, use colar lista do grupo na presença: o app marca quem achar, na ordem da lista. Quem chega depois do primeiro set entra num time pela tela de times e só conta dali para frente. Se alguém for embora, toque no nome dele.</p>
-  <h3>Placar</h3><p>Os pontos entram nas cartas assim que o placar é anotado. As cartas são recalculadas a partir dos jogos, então corrigir um número, até de um jogo antigo, ajusta tudo sozinho. Apagar um jogo tira o efeito dele. Encerrar só trava o jogo para ninguém mexer sem querer.</p>
-  <h3>Erro de lançamento</h3><p>Errou um lance? Use desfazer na súmula. Errou o placar? Corrija o número. Se o jogo estiver encerrado, toque em reabrir para corrigir.</p>
+  <h3>Sorteio</h3><p>O app testa as divisões e escolhe uma das mais equilibradas pelo geral, sem juntar os levantadores e os centrais no mesmo time. Altura e idade, quando preenchidas, servem de desempate. Também dá para montar os times na mão ou deixar dois capitães escolherem.</p>
+  ${FBM() ? '<h3>Placar e contestação</h3><p>O placar vale assim que é anotado. Quem jogou tem 24 horas para contestar se estiver errado, e um admin decide. Corrigir um placar, até de um jogo antigo, recalcula as cartas sozinho.</p>' : '<h3>Placar</h3><p>Os pontos entram nas cartas assim que o placar é anotado. Corrigir um número, até de um jogo antigo, recalcula tudo sozinho. Apagar um jogo tira o efeito dele.</p>'}
+  ${FBM() ? '<h3>Jogos, turmas e links</h3><p>Você não precisa de turma para jogar. Ao marcar um jogo, escolha quem pode entrar: só quem você chamar pelo link, a turma toda ou aberto ao público, que aparece para quem joga perto e pede vaga. A turma serve para um grupo fixo, com jogo da semana, ranking e pagamentos. São três links: o do jogo chama para um jogo, o da turma coloca alguém no grupo e o de amizade adiciona como amigo.</p>' : ''}
+  ${pay ? '<h3>Pagamentos</h3><p>Mensalista paga por mês e tem vaga garantida até o prazo da véspera. Avulso paga por jogo; quem desiste depois do prazo continua devendo. Quem entra no meio do mês paga só os jogos que faltam. Só os admins veem quem pagou.</p>' : ''}
   <h3>Seus dados</h3><p>${FBM() ? 'Os dados ficam na nuvem da turma, e cada um entra com a própria conta.' : S.mode === 'cloud' ? 'Os dados ficam na sua conta do Claude.' : 'Os dados ficam salvos só neste celular. Se apagar o app da Tela de Início, eles somem junto.'}${FBM() ? '' : ` O backup gera um arquivo com tudo, cartas, fotos e jogos, que você pode guardar no Arquivos ou mandar para você mesmo no WhatsApp.${lastBackup() ? ` Último backup: ${fmtDay(lastBackup()).toLowerCase()}.` : ''}`}</p>
   ${S.canWrite && !FBM() ? `<div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="backup">Salvar backup</button><button class="btn btn-block" data-act="restore">Restaurar um backup</button></div>` : ''}
   </div>`;
@@ -2709,7 +2716,7 @@ function perfilHTML() {
     : `<div class="empty"><h3>Você ainda não tem carta</h3><p class="sub">Crie a sua para entrar no elenco e confirmar presença.</p><button class="btn btn-ball" data-act="newSelf">Criar minha carta</button></div>`;
   h += `<p class="sub small" style="text-align:center;margin-top:10px">Conectado como ${esc(S.me.name)}, ${esc(S.me.email)}.</p>`;
   h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px"><h2 class="h-sec" style="margin:0;flex:1">${esc(S.turma && S.turma.name ? S.turma.name : 'Turma')}</h2>${admin ? '<button class="btn btn-sm" data-act="renameTurma">Renomear</button>' : ''}</div>`;
-  h += `<div><div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar a galera</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link da turma</button>' : ''}</div>${privacyOn() ? '<p class="sub small" style="margin-top:8px">Quem entra pelo seu link chega na turma como seu amigo. <button class="link-btn" data-act="askNewMyLink">Trocar o meu link</button></p>' : ''}${privacyOn() ? '' : `<p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p>`}</div>`;
+  h += `<div><div style="display:grid;gap:10px"><button class="btn btn-block btn-ball" data-act="shareInvite">${ICON.copy}Convidar para a turma</button>${admin ? '<button class="btn btn-block" data-act="askNewInvite">Trocar o link da turma</button>' : ''}</div>${privacyOn() ? '<p class="sub small" style="margin-top:8px">Quem entra pelo link da turma recebe a sugestão de te adicionar como amigo. <button class="link-btn" data-act="askNewMyLink">Trocar o meu link</button></p>' : ''}${privacyOn() ? '' : `<p class="sub small" style="margin-top:8px">Quem tiver o link entra na turma e cria a própria carta.${admin ? ' Se o link vazar, troque: o antigo para de funcionar.' : ''}</p>`}</div>`;
   if (admin && FBM() && window.MCloud.setPay) h += section('Pagamentos', `<div style="display:grid;gap:10px"><button class="btn btn-block" data-act="payCfgOpen">${payOn() ? 'Configurar pagamentos' : 'Começar a cobrar pelo app'}</button>${payOn() ? `<button class="btn btn-block" data-act="payMes" data-ym="${ymNow()}">Ver o mês</button>` : ''}</div><p class="sub small" style="margin-top:8px">Mensalidade, avulsos e Pix com o valor certo. Só os admins veem quem pagou.</p>`);
   h += section(members.length === 1 ? '1 membro' : `${members.length} membros`, listBox(members.map(m => {
     const role = S.turma && S.turma.ownerUid === m.uid ? 'Criou a turma' : (S.turma && (S.turma.admins || []).includes(m.uid) ? 'Admin' : 'Membro');
@@ -3039,8 +3046,8 @@ function tourSlides() {
   return [
     { art: cardArt, title: 'Esta é a sua carta', text: 'O número grande é o seu geral. Ele sobe quando seu time ganha e quando a galera te dá nota acima da média do jogo, no máximo 2 pontos por jogo. A cor mostra o nível, de bronze a lenda.' },
     { art: boardArt, title: 'Presença em um toque', text: 'O próximo jogo aparece no topo: é só tocar em Vou jogar. Se lotar, você entra na espera e é avisado quando abrir vaga. Quem marca a partida é quem cuida dela, e você também pode marcar as suas.' },
-    ...(privacyOn() ? [{ art: `<div class="tour-score" aria-hidden="true"><div class="tour-set"><span class="av">R</span><b style="font-size:18px">Rafa</b><span class="spacer"></span><span class="btn btn-sm">Adicionar</span></div><div class="tour-set"><span class="av">B</span><b style="font-size:18px">Bia</b><span class="spacer"></span><span class="pill pill-done">Amigos</span></div></div>`, title: 'Sua galera', text: 'Você entra como amigo de quem te convidou. No Elenco aparece todo mundo da turma, e quem ainda não é seu amigo tem a faixa amarela na carta para adicionar. Quem é de fora da turma não vê nada.' }] : []),
-    { art: scoreArt, title: 'O placar mexe nas cartas', text: 'Quando o placar é anotado, as cartas sobem ou descem na hora. Se quem marcou não for admin da turma, alguém do outro time confirma o placar antes de valer.' }
+    ...(privacyOn() ? [{ art: `<div class="tour-score" aria-hidden="true"><div class="tour-set"><span class="av">R</span><b style="font-size:18px">Rafa</b><span class="spacer"></span><span class="btn btn-sm">Adicionar</span></div><div class="tour-set"><span class="av">B</span><b style="font-size:18px">Bia</b><span class="spacer"></span><span class="pill pill-done">Amigos</span></div></div>`, title: 'Sua galera', text: 'No Elenco aparece todo mundo da turma. Quem ainda não é seu amigo tem a faixa amarela na carta para adicionar, e quem te convidou aparece como sugestão. Quem é de fora da turma não vê nada.' }] : []),
+    { art: scoreArt, title: 'O placar mexe nas cartas', text: 'Quando o placar é anotado, ele já vale. Quem jogou tem 24 horas para contestar se estiver errado, e um admin decide. Depois a galera dá as notas, e a carta termina de mudar.' }
   ];
 }
 function openTour() {
@@ -3806,6 +3813,29 @@ function novoJogoHTML() {
   <button class="btn btn-block btn-ball nj-go" data-act="saveGame" data-id="">Marcar jogo</button>
   </div>`;
 }
+function editarJogoHTML(id) {
+  const g = S.games[id];
+  const hoje = todayStr(), dias = Array.from({ length: 7 }, (_, i) => addDays(hoje, i));
+  const dd = dt => `${dt.slice(8, 10)}/${dt.slice(5, 7)}`;
+  const nomeDia = (dt, i) => i === 0 ? 'Hoje' : i === 1 ? 'Amanhã' : DIA_CURTO[new Date(dt + 'T12:00').getDay()];
+  const lugares = lugaresRecentes().filter(p => p !== g.place);
+  return `<div class="nj">
+  <div class="nj-lb">Quando</div>
+  <div class="nj-chips" role="group" aria-label="Dia">${dias.map((dt, i) => `<button class="nj-ch" data-act="njDia" data-v="${dt}" aria-pressed="${dt === g.date}">${nomeDia(dt, i)}<small>${dd(dt)}</small></button>`).join('')}</div>
+  <div class="nj-chips" role="group" aria-label="Horário">${['18:00', '19:00', '20:00', '21:00'].map(x => `<button class="nj-ch nj-hora" data-act="njHora" data-v="${x}" aria-pressed="${x === g.time}">${x.slice(0, 2)}h</button>`).join('')}</div>
+  <div class="grid2 nj-outro"><label class="field"><span>Outro dia</span><input class="input" type="date" id="fDate" value="${esc(g.date)}"></label><label class="field"><span>Outro horário</span><input class="input" type="time" id="fTime" value="${esc(g.time)}"></label></div>
+  <div class="nj-lb">Onde</div>
+  <label class="nj-inp">${NJ_ICON.pin}<input type="text" id="fPlace" maxlength="80" value="${esc(g.place)}" placeholder="Nome da quadra" aria-label="Local"></label>
+  ${lugares.length ? `<div class="nj-mini">${lugares.map(p => `<button class="mc nj-lugar" data-act="njLugar" data-v="${esc(p)}">${esc(p)}</button>`).join('')}</div>` : ''}
+  ${espacoPessoal() ? '' : visField(g)}
+  <div class="nj-card"><span class="nj-rt">Vagas no total</span><span class="nj-stp"><button class="nj-sb" data-act="njPasso" data-alvo="fMax" data-d="-1" aria-label="Menos uma vaga">−</button><input id="fMax" type="number" inputmode="numeric" min="0" max="60" value="${g.max || ''}" placeholder="–" aria-label="Vagas no total"><button class="nj-sb" data-act="njPasso" data-alvo="fMax" data-d="1" aria-label="Mais uma vaga">+</button></span></div>
+  <div class="nj-card"><span class="nj-rt">Repetir toda semana</span><button class="nj-sw" data-act="gRepeat" aria-pressed="${!!g.repeat}" aria-label="Repetir toda semana"></button></div>
+  <label class="field"><span>Observação</span><input class="input" type="text" id="fNote" maxlength="300" value="${esc(g.note || '')}" placeholder="Opcional: levar bola, valor da quadra"></label>
+  <div id="fErr" class="err" role="alert"></div>
+  <button class="btn btn-block btn-ball nj-go" data-act="saveGame" data-id="${esc(g.id)}">Salvar jogo</button>
+  ${canEditGame(g) ? `<button class="btn btn-block btn-danger-soft" data-act="askDeleteGame" data-id="${esc(g.id)}">Apagar jogo</button>` : ''}
+  </div>`;
+}
 async function garantirEspaco() {
   if (S.turma && S.turma.pessoal && S.turma.ownerUid === meId()) return S.turmaId;
   const mine = (S.myTurmas || []).find(ehPessoal);
@@ -4002,7 +4032,7 @@ function notasHTML(g) {
     else h += '<p class="sub">Ninguém recebeu votos suficientes nesta partida.</p>';
     return section('Notas da galera', h);
   }
-  if (est === 'antes') return section('Notas da galera', `<p class="sub">A votação abre quando o jogo for encerrado, ou sozinha às ${new Date(notasAbre(g)).getHours()}h, e fica aberta até as 23h do dia seguinte.</p>`);
+  if (est === 'antes') return section('Notas da galera', `<p class="sub">A votação abre quando o jogo for encerrado, ou sozinha às ${(d => d.getHours() + 'h' + (d.getMinutes() ? String(d.getMinutes()).padStart(2, '0') : ''))(new Date(notasAbre(g)))}, e fica aberta até as 23h do dia seguinte.</p>`);
   if (est === 'fechada') { if (isTurmaAdmin()) setTimeout(ensureNotas, 0); return section('Notas da galera', '<p class="sub">A votação fechou. O resultado aparece assim que um admin abrir o app.</p>'); }
   const rat = rateesFor(g, me), mine = notasMinhas(g), dadas = rat.filter(pid => mine[pid] != null).length;
   const nv = vs.filter(u => notasDone(g, u)).length;
@@ -4431,6 +4461,7 @@ function payKeyLabel(key) {
 const payKeyValor = (pid, key) => key.startsWith('m:') ? mensalValor(pid, key.slice(2)) : payCfg().avulso;
 const payKeyVenc = key => key.startsWith('m:') ? vencOf(key.slice(2)) : ((S.games[key.slice(2)] || {}).date || todayStr());
 function myPayDue() {
+  if (payCfg().recebedor && payCfg().recebedor === meId()) return null;
   if (!payOn() || !P(meId())) return null;
   const c = payCfg(), me = meId(), open = k => ['pend', 'avisou'].includes(payState(me, k).st);
   if (isMensalista(me)) {
@@ -4533,7 +4564,7 @@ function presencaPay(g) {
     if (admin) right = mode === 'wait' ? '<span class="ptag">Espera</span>' : (!charged(id) ? '<span class="pst pst-mute">Provisório</span>' : payChip(id, key(id)));
     else if (!me && FB() && privacyOn() && canFriend(id) && friendState(id) !== 'friend') right = friendBtn(id);
     const tog = me && mode !== 'late' ? `<button class="toggle" data-act="togglePres" data-pid="${esc(id)}" aria-pressed="true">Desmarcar</button>` : (W && !admin && mode !== 'late' ? `<button class="toggle" data-act="togglePres" data-pid="${esc(id)}" aria-pressed="true">Vai</button>` : '');
-    return `<div class="pres"><span class="pres-n">${n}</span>${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}${me ? ' (você)' : ''}</div><div class="item-sub">${esc(posLabel(p))}, ${kind(id)}${mode === 'late' ? ', desistiu depois do prazo' : ''}</div></div>${right}${tog}</div>`;
+    return `<div class="pres"><span class="pres-n">${n}</span>${avatar(p)}<div class="item-main"><div class="item-title">${me ? 'Você' : esc(p.nick || p.name)}</div><div class="item-sub">${esc(posLabel(p))}, ${kind(id)}${mode === 'late' ? ', desistiu depois do prazo' : ''}</div></div>${right}${tog}</div>`;
   };
   const block = (title, ids, mode) => { const vis = ids.filter(show); if (!ids.length || (admin && f && !vis.length)) return ''; return `<div class="pay-sec">${title}</div>` + listBox(vis.map(id => row(id, mode === 'wait' || mode === 'late' ? '–' : spots.indexOf(id) + 1, mode))); };
   h += block('Mensalistas, vaga garantida', spots.filter(id => mens.has(id)), 'in');
