@@ -4111,14 +4111,16 @@ function cleanAberto(id, d) {
     id, turma: str(d.turma, 80), turmaNome: str(d.turmaNome, 40), createdBy: str(d.createdBy, 80), orgName: str(d.orgName, 40) || 'Quem organiza',
     vis: d.vis === 'rede' ? 'rede' : 'todos', date: /^\d{4}-\d{2}-\d{2}$/.test(d.date || '') ? d.date : todayStr(), time: /^\d{2}:\d{2}$/.test(d.time || '') ? d.time : '20:00',
     place: str(d.place, 60), max: clamp(Math.round(Number(d.max) || 0), 0, 99), conf: clamp(Math.round(Number(d.conf) || 0), 0, 199),
-    visit: clamp(Math.round(Number(d.visit) || 0), 0, 99), prazo: Number(d.prazo) || 0, congelado: Number(d.congelado) > 0 ? Number(d.congelado) : 0, updated: Number(d.updated) || 0
+    visit: clamp(Math.round(Number(d.visit) || 0), 0, 99), prazo: Number(d.prazo) || 0, congelado: Number(d.congelado) > 0 ? Number(d.congelado) : 0, menor: Number(d.menor) > 0 ? Number(d.menor) : 0, updated: Number(d.updated) || 0
   });
 }
 function abertoPreco(a) {
   const p = a.preco || {};
   if (p.modo === 'rateio' && p.custo > 0) {
     const min = Math.max(1, p.minimo || 1), max = Math.max(min, a.max || min);
-    const now = a.congelado || ceil50(p.custo / clamp(a.conf || 0, min, max));
+    // O rateio só cai: o valor por pessoa nunca volta a subir, mesmo se alguém desmarcar; na véspera, congela.
+    const calc = ceil50(p.custo / clamp(a.conf || 0, min, max));
+    const now = a.congelado || (a.menor ? Math.min(a.menor, calc) : calc);
     return { rateio: true, valor: now, teto: ceil50(p.custo / min), piso: ceil50(p.custo / max), custo: p.custo, congelado: !!a.congelado };
   }
   return { rateio: false, valor: p.valor || 0 };
@@ -4178,6 +4180,7 @@ function abertoPublico(g) {
     vis: a.vis, rede: a.vis === 'rede' ? redeIds() : [], date: g.date, time: g.time, place: a.quadra || g.place || '', endereco: a.endereco, lat: a.lat, lng: a.lng,
     nivel: a.nivel, preco: a.preco, vagas: a.vagas, max: g.max || 0, conf: confOrder(g).length, visit: visitantesDe(g).length, prazo: cutoffOf(g), updated: Date.now() };
   d.congelado = prev && prev.congelado ? prev.congelado : 0;
+  if (a.preco.modo === 'rateio') { const calc = abertoPreco(cleanAberto(g.id, Object.assign({}, d, { menor: 0, congelado: 0 }))).valor; d.menor = prev && prev.menor ? Math.min(prev.menor, calc) : calc; }
   if (!d.congelado && a.preco.modo === 'rateio' && Date.now() > d.prazo) d.congelado = abertoPreco(cleanAberto(g.id, d)).valor;
   return d;
 }
