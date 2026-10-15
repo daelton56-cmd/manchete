@@ -683,6 +683,26 @@ input[type=date].input::-webkit-datetime-edit,input[type=time].input::-webkit-da
 .nm-cor:active{transform:scale(.92)}
 .nm-cor[aria-pressed="true"]{background:var(--c); box-shadow:none}
 .nm-cor svg{width:20px; height:20px}
+
+/* Escalação em quadra */
+.esc{margin-top:22px}
+.esc-quadra{position:relative; background:linear-gradient(180deg,#F2D8B0,#EBC892); border-radius:22px; padding:12px 8px; box-shadow:inset 0 0 0 3px rgba(255,255,255,.75), var(--sh-1)}
+.esc-meia{display:flex; flex-direction:column; gap:6px}
+.esc-lin{display:grid; grid-template-columns:repeat(3,1fr); gap:4px}
+.esc-ata{height:0; border-top:2px dashed rgba(255,255,255,.85); margin:2px 6px}
+.esc-rede{height:10px; margin:10px -8px; background:repeating-linear-gradient(90deg,#0F2240 0 2px,transparent 2px 7px), #24395E; border-radius:2px; box-shadow:0 2px 0 rgba(15,34,64,.25)}
+.esc-p{position:relative; border:0; background:transparent; font:inherit; color:#2B1D08; display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 2px; min-height:92px; border-radius:16px}
+.esc-p .av{width:46px; height:46px; box-shadow:0 0 0 3px var(--c), 0 4px 10px rgba(43,29,8,.25)}
+.esc-p.sel{background:rgba(255,255,255,.55); box-shadow:inset 0 0 0 2px #0F2240}
+.esc-n{font-weight:700; font-size:13px; line-height:1.15; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center}
+.esc-n i{display:block; font-style:normal; font-weight:600; font-size:10px; opacity:.75}
+.esc-tag{font-size:10px; font-weight:800; letter-spacing:.04em; background:rgba(15,34,64,.85); color:#fff; border-radius:999px; padding:1px 7px}
+.esc-z{position:absolute; top:4px; left:8px; font:800 11px var(--display, sans-serif); opacity:.55}
+.esc-vazio{justify-content:center; opacity:.5}
+.esc-vazio .esc-z{position:static; font-size:18px}
+.esc-banco{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:10px}
+.esc-bchip.sel{background:#0F2240; color:#fff}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .esc-quadra{background:linear-gradient(180deg,#5A4325,#4C381F); box-shadow:inset 0 0 0 3px rgba(255,255,255,.25)} :root:not([data-theme="light"]) .esc-p{color:#F5E9D6} :root:not([data-theme="light"]) .esc-p.sel{background:rgba(255,255,255,.12); box-shadow:inset 0 0 0 2px #F7C531} }
 @media (prefers-reduced-motion:reduce){
   .sheet, .sheet-bg{animation:none}
   .btn, .chip, .toggle, .card-btn, .item{transition:none}
@@ -1216,6 +1236,7 @@ function cleanPlayer(id, d) {
     guest: d.guest === true,
     visitor: typeof d.visitor === 'string' ? d.visitor.slice(0, 80) : '',
     rascunho: d.rascunho === true,
+    temp: d.temp === true, tempGid: typeof d.tempGid === 'string' ? d.tempGid.slice(0, 80) : '',
     createdBy: typeof d.createdBy === 'string' ? d.createdBy : null,
     locked: d.locked === true,
     height: typeof d.height === 'number' && d.height >= 120 && d.height <= 230 ? Math.round(d.height) : null,
@@ -1288,6 +1309,7 @@ function cleanGame(id, d) {
     galera: cleanGaleraPub(d.galera),
     placarRapido: d.placarRapido === true,
     notasCriador: d.notasCriador === true,
+    escalacao: cleanEscalacao(d.escalacao),
     contest: cleanContest(d.contest)
   };
   const idxMap = o => { const r = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (typeof v === 'number' && v >= 0 && v <= 60) r[k] = Math.round(v); return r; };
@@ -1736,7 +1758,10 @@ const P = id => S.players[id] ? D().view[id] : undefined;
 const RAW = id => S.players[id];
 const resultOf = g => (g && D().results[g.id]) || null;
 const posLabel = p => { const m = (POS[p.pos] || POS.cor).name; const o = (p.pos2 || []).map(k => POS[k].name.toLowerCase()); return o.length ? `${m}, também ${o.join(' e ')}` : m; };
-const nameOf = id => { const p = P(id); return p ? (p.nick || p.name) : 'Jogador removido'; };
+const nameOf = id => { const p = P(id); return p ? (nomeVis(p)) : 'Jogador removido'; };
+function nomeVis(p) { if (!p) return ''; const n = p.nick || p.name; return p.temp ? `${n} (avulso)` : n; }
+// Carta avulsa: só existe no jogo em que foi criada; não aparece no Elenco, no Ranking nem nas listas de outros jogos.
+const avulsoFora = (p, g) => !!(p && p.temp && (!g || p.tempGid !== g.id));
 function initials(p) { const parts = (p.name || p.nick || '?').trim().split(/\s+/); return ((parts[0] || '?')[0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase(); }
 function avatar(p) { if (!p) return '<span class="av">?</span>'; return `<span class="av">${p.photo ? `<img src="${p.photo}" alt="">` : esc(initials(p))}</span>`; }
 const curGame = () => S.ui.gameId ? S.games[S.ui.gameId] : null;
@@ -1782,11 +1807,11 @@ function cardHTML(p, opt = {}) {
   const pos = POS[p.pos] || POS.cor;
   const tr = p.last && p.last.d ? `<span class="trend">${p.last.d > 0 ? '▲' : '▼'}${Math.abs(p.last.d)}</span>` : '';
   const ph = p.photo ? `<img src="${p.photo}" alt="">` : `<span>${esc(initials(p))}</span>`;
-  const photoBox = opt.zoom && p.photo ? `<button class="card-photo card-zoom" data-act="zoomPhoto" data-pid="${esc(p.id)}" aria-label="Ver a foto de ${esc(p.nick || p.name)}">${ph}</button>` : `<div class="card-photo">${ph}</div>`;
+  const photoBox = opt.zoom && p.photo ? `<button class="card-photo card-zoom" data-act="zoomPhoto" data-pid="${esc(p.id)}" aria-label="Ver a foto de ${esc(nomeVis(p))}">${ph}</button>` : `<div class="card-photo">${ph}</div>`;
   const at = a => `<div data-a="${a}"><b>${Math.round(p.at[a])}</b><span>${ATTR[a].abbr}</span></div>`;
   return `<div class="card t-${tier.key} ${opt.size ? 'card-' + opt.size : ''}">
     <div class="card-top"><div class="card-ovr"><b>${ovr}</b><small>${pos.abbr}</small>${tr}</div>${photoBox}</div>
-    <div class="card-name">${esc(p.nick || p.name)}</div>
+    <div class="card-name">${esc(nomeVis(p))}</div>
     <div class="card-attrs">${at('saq')}${at('ata')}${at('rec')}${at('blo')}${at('lev')}${at('def')}</div>
     <div class="card-tier"${opt.hideTier ? ' style="visibility:hidden"' : ''}>${tier.name}</div>
   </div>`;
@@ -1883,7 +1908,7 @@ function notifData() {
 }
 function renderNotifBadge() { if (FB()) renderTop(); }
 // Nome para as notificações: nunca "Jogador removido" para quem acabou de entrar.
-function personName(u) { const p = P(u); if (p && p.known !== false && p.name && p.name !== 'Jogador') return p.nick || p.name; const pi = personalOf(u); return pi && pi.name ? (pi.nick || pi.name) : ''; }
+function personName(u) { const p = P(u); if (p && p.known !== false && p.name && p.name !== 'Jogador') return nomeVis(p); const pi = personalOf(u); return pi && pi.name ? (nomeVis(pi)) : ''; }
 function todoRow(a) {
   if (a.kind === 'contest') return `<div class="pres"><div class="item-main"><div class="item-title">Placar contestado</div><div class="item-sub">Jogo de ${esc(fmtDay(a.g.date).toLowerCase())}. Revise para voltar a contar</div></div><button class="btn btn-sm btn-ball" data-act="openGame" data-id="${esc(a.g.id)}">Ver</button></div>`;
   if (a.kind === 'notas') return `<div class="pres"><div class="item-main"><div class="item-title">Dar nota pra galera</div><div class="item-sub">Jogo de ${esc(fmtDay(a.g.date).toLowerCase())}. Até ${esc(fmtFecha(notasFecha(a.g)))}</div></div><button class="btn btn-sm btn-ball" data-act="notasAbrir" data-gid="${esc(a.g.id)}">Dar notas</button></div>`;
@@ -1897,7 +1922,7 @@ function notifsHTML() {
   const d = notifData(), fn = u => esc(personName(u) || 'Alguém novo');
   let h = '';
   const reqs = d.act.filter(a => a.kind === 'req'), todo = d.act.filter(a => a.kind !== 'req');
-  if (reqs.length) h += section('Pedidos de amizade', listBox(reqs.map(a => { const p = P(a.uid) || cleanProfile({ name: a.f.fromName, photo: a.f.fromPhoto }); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc((p && (p.nick || p.name)) || a.f.fromName || 'Alguém')}</div><div class="item-sub">quer ser seu amigo</div></div><div class="row-wrap" style="gap:6px"><button class="btn btn-sm btn-ball" data-act="friendAccept" data-uid="${esc(a.uid)}">Aceitar</button><button class="btn btn-sm btn-ghost" data-act="friendCancel" data-uid="${esc(a.uid)}" aria-label="Recusar">${ICON.x}</button></div></div>`; })));
+  if (reqs.length) h += section('Pedidos de amizade', listBox(reqs.map(a => { const p = P(a.uid) || cleanProfile({ name: a.f.fromName, photo: a.f.fromPhoto }); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc((p && (nomeVis(p))) || a.f.fromName || 'Alguém')}</div><div class="item-sub">quer ser seu amigo</div></div><div class="row-wrap" style="gap:6px"><button class="btn btn-sm btn-ball" data-act="friendAccept" data-uid="${esc(a.uid)}">Aceitar</button><button class="btn btn-sm btn-ghost" data-act="friendCancel" data-uid="${esc(a.uid)}" aria-label="Recusar">${ICON.x}</button></div></div>`; })));
   if (todo.length) h += section('Para fazer', listBox(todo.map(todoRow)));
   const sug = suggestions().slice(0, 6);
   if (sug.length) h += section('Sugestões para você', sugRow(sug));
@@ -2079,7 +2104,7 @@ function sugReason(c) {
 }
 function sugTile(c) {
   const p = P(c.id); if (!p) return '';
-  return `<div class="sug"><button class="sug-x" data-act="sugHide" data-uid="${esc(c.id)}" aria-label="Dispensar sugestão">${ICON.x}</button><button class="sug-av" data-act="openPlayer" data-pid="${esc(c.id)}" aria-label="Ver ${esc(p.nick || p.name)}">${avatar(p)}</button><div class="sug-name">${esc(p.nick || p.name)}</div><div class="sug-why">${esc(sugReason(c))}</div>${friendBtn(c.id)}</div>`;
+  return `<div class="sug"><button class="sug-x" data-act="sugHide" data-uid="${esc(c.id)}" aria-label="Dispensar sugestão">${ICON.x}</button><button class="sug-av" data-act="openPlayer" data-pid="${esc(c.id)}" aria-label="Ver ${esc(nomeVis(p))}">${avatar(p)}</button><div class="sug-name">${esc(nomeVis(p))}</div><div class="sug-why">${esc(sugReason(c))}</div>${friendBtn(c.id)}</div>`;
 }
 function sugRow(list) { return list.length ? `<div class="sug-row" role="list">${list.map(sugTile).join('')}</div>` : ''; }
 function cardAddBar(id) {
@@ -2092,31 +2117,31 @@ function cardsGrid(ps, extra, o = {}) {
   const mvp = mvpId();
   return `<div class="cards">${ps.map(p => {
     const bar = o.addBar && canFriend(p.id) && friendState(p.id) !== 'friend';
-    return `<div class="card-cell"><div class="card-stack"><button class="card-btn" data-act="openPlayer" data-pid="${esc(p.id)}" aria-label="${esc(p.nick || p.name)}, geral ${ovrOf(p)}">${cardHTML(p, { destaque: p.id === mvp, hideTier: bar })}</button>${bar ? cardAddBar(p.id) : ''}</div>${extra ? extra(p) : ''}</div>`;
+    return `<div class="card-cell"><div class="card-stack"><button class="card-btn" data-act="openPlayer" data-pid="${esc(p.id)}" aria-label="${esc(nomeVis(p))}, geral ${ovrOf(p)}">${cardHTML(p, { destaque: p.id === mvp, hideTier: bar })}</button>${bar ? cardAddBar(p.id) : ''}</div>${extra ? extra(p) : ''}</div>`;
   }).join('')}</div>`;
 }
 function whoPlayedHTML(g) {
   if (!FB() || !privacyOn() || !hasResult(g)) return '';
   const ids = teamIds(g).filter(id => id !== meId() && P(id));
   if (!ids.length) return '';
-  return section('Quem jogou', listBox(ids.map(id => { const p = P(id), ti = teamOfId(g, id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${p.guest ? 'Convidado' : esc((POS[p.pos] || POS.cor).name)}${ti >= 0 ? `, time ${TEAMS[ti].name.toLowerCase()}` : ''}</div></div>${friendState(id) === 'friend' ? '' : friendBtn(id)}</div>`; })));
+  return section('Quem jogou', listBox(ids.map(id => { const p = P(id), ti = teamOfId(g, id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(nomeVis(p))}</div><div class="item-sub">${p.guest ? 'Convidado' : esc((POS[p.pos] || POS.cor).name)}${ti >= 0 ? `, time ${TEAMS[ti].name.toLowerCase()}` : ''}</div></div>${friendState(id) === 'friend' ? '' : friendBtn(id)}</div>`; })));
 }
 function elencoSocial() {
   const filter = S.ui.elencoFilter || '', mine = P(meId());
   let h = banners();
   h += `<div class="row" style="margin-top:12px"><button class="btn btn-block" data-act="convidarAmigos">${ICON.plus}Convidar amigos</button></div>`;
   h += searchBoxHTML();
-  if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${esc(tierOf(ovrOf(mine)).name)} · ${ovrOf(mine)}</div>${mine.last && mine.last.d ? `<div class="nt-d ${mine.last.d > 0 ? 'up' : 'down'}">${mine.last.d > 0 ? '↑' : '↓'} ${Math.abs(mine.last.d)} no último jogo</div>` : ''}${friendIds().length ? `<div class="sub small">${plural(friendIds().length, 'amigo', 'amigos')}</div>` : ''}</div></div>`;
+  if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(nomeVis(mine))}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${esc(tierOf(ovrOf(mine)).name)} · ${ovrOf(mine)}</div>${mine.last && mine.last.d ? `<div class="nt-d ${mine.last.d > 0 ? 'up' : 'down'}">${mine.last.d > 0 ? '↑' : '↓'} ${Math.abs(mine.last.d)} no último jogo</div>` : ''}${friendIds().length ? `<div class="sub small">${plural(friendIds().length, 'amigo', 'amigos')}</div>` : ''}</div></div>`;
   if (!filter) { const sug = suggestions().filter(c => !S.players[c.id]); if (sug.length) h += section('Sugestões para você', sugRow(sug)); }
   const cnt = coPlayers();
-  let ids = filter === 'recentes' ? [...cnt.keys()] : filter === 'amigos' ? friendIds() : Object.keys(S.players);
+  let ids = filter === 'recentes' ? [...cnt.keys()] : filter === 'amigos' ? friendIds() : Object.keys(S.players).filter(id => !(S.players[id] && S.players[id].temp));
   const ps = [...new Set(ids)].filter(id => id !== meId()).map(P).filter(Boolean);
-  const sorters = { ovr: (x, y) => ovrOf(y) - ovrOf(x), nome: (x, y) => (x.nick || x.name).localeCompare(y.nick || y.name, 'pt-BR'), pos: (x, y) => Object.keys(POS).indexOf(x.pos) - Object.keys(POS).indexOf(y.pos) || ovrOf(y) - ovrOf(x) };
+  const sorters = { ovr: (x, y) => ovrOf(y) - ovrOf(x), nome: (x, y) => (nomeVis(x)).localeCompare(nomeVis(y), 'pt-BR'), pos: (x, y) => Object.keys(POS).indexOf(x.pos) - Object.keys(POS).indexOf(y.pos) || ovrOf(y) - ovrOf(x) };
   ps.sort(sorters[S.ui.sort] || sorters.ovr);
   const tname = espacoPessoal() && S.turma.ownerUid === meId() ? 'Quem joga com você' : ((S.turma && S.turma.name) || 'Turma'), many = (S.myTurmas || []).length > 1;
   h += `<div class="row" style="align-items:flex-end;margin:26px 0 10px">${many
     ? `<button class="turma-switch" data-act="turmaMenu" aria-label="${esc(tname)}. Trocar de turma"><span class="h-sec" style="margin:0">${esc(tname)}</span>${ICON.down}</button>`
-    : `<h2 class="h-sec" style="margin:0">${esc(tname)}</h2>`}<span class="spacer"></span><span class="sub small">${plural(Object.keys(S.players).length, 'jogador', 'jogadores')}</span></div>`;
+    : `<h2 class="h-sec" style="margin:0">${esc(tname)}</h2>`}<span class="spacer"></span><span class="sub small">${plural(Object.keys(S.players).filter(id => !(S.players[id] && S.players[id].temp)).length, 'jogador', 'jogadores')}</span></div>`;
   const chip = (k, l) => `<button class="chip" data-act="sort" data-sort="${k}" aria-pressed="${S.ui.sort === k}">${l}</button>`;
   const fchip = (k, l) => `<button class="chip" data-act="elencoFilter" data-v="${k}" aria-pressed="${filter === k}">${l}</button>`;
   h += `<div class="chips-line">${chip('ovr', 'Geral')}${chip('nome', 'Nome')}${chip('pos', 'Posição')}<span class="chip-sep" aria-hidden="true"></span>${fchip('amigos', 'Amigos')}${fchip('recentes', 'Jogou comigo')}</div>`;
@@ -2129,12 +2154,12 @@ function elencoSocial() {
   const noCard = filter ? [] : Object.keys(S.members).filter(u => u !== meId() && !S.players[u]);
   if (noCard.length) {
     fetchMemberNames();
-    h += section('Entraram e ainda não criaram a carta', listBox(noCard.map(u => { const pi = personalOf(u); const nm = pi && pi.name ? (pi.nick || pi.name) : 'Alguém novo'; return `<div class="pres">${avatar(pi || { name: nm })}<div class="item-main"><div class="item-title">${esc(nm)}</div><div class="item-sub">Está na turma, falta criar a carta</div></div>${friendBtn(u)}</div>`; })) + '<p class="sub small" style="margin-top:8px">Assim que a pessoa criar a carta, ela aparece junto com a galera.</p>');
+    h += section('Entraram e ainda não criaram a carta', listBox(noCard.map(u => { const pi = personalOf(u); const nm = pi && pi.name ? (nomeVis(pi)) : 'Alguém novo'; return `<div class="pres">${avatar(pi || { name: nm })}<div class="item-main"><div class="item-title">${esc(nm)}</div><div class="item-sub">Está na turma, falta criar a carta</div></div>${friendBtn(u)}</div>`; })) + '<p class="sub small" style="margin-top:8px">Assim que a pessoa criar a carta, ela aparece junto com a galera.</p>');
   }
   h += `<p class="sub small" style="margin-top:14px">${filter === 'recentes' ? 'Quem jogou com você nas suas últimas 10 partidas.' : filter === 'amigos' ? 'Seus amigos nesta turma.' : 'Todo mundo desta turma. Quem ainda não é seu amigo tem a faixa amarela na carta para adicionar.'}</p>`;
   if (filter !== 'recentes') {
     const outside = Object.entries(S.myMirrors).filter(([u]) => !S.players[u] && !S.members[u] && isFriend(u));
-    if (outside.length) h += section('Amigos de outras turmas', listBox(outside.map(([u, x]) => `<div class="pres">${avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">Ainda não está nesta turma</div></div><button class="btn btn-sm" data-act="shareInvite">Chamar</button></div>`)));
+    if (outside.length) h += section('Amigos de outras turmas', listBox(outside.map(([u, x]) => `<div class="pres">${avatar(x)}<div class="item-main"><div class="item-title">${esc(nomeVis(x))}</div><div class="item-sub">Ainda não está nesta turma</div></div><button class="btn btn-sm" data-act="shareInvite">Chamar</button></div>`)));
   }
   return h;
 }
@@ -2147,11 +2172,11 @@ function elencoView() {
   const mine = FB() ? P(meId()) : null;
   const ps = Object.keys(S.players).map(P).filter(p => !mine || p.id !== mine.id);
   let h = banners() + searchBoxHTML();
-  if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(mine.nick || mine.name)}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${mine.n ? `${plural(mine.tot.jogos, 'jogo', 'jogos')}, ${mine.tot.sets ? Math.round(100 * mine.tot.setsV / mine.tot.sets) + '% dos sets ganhos' : 'sem sets ainda'}` : 'Ainda sem jogos com placar.'}</div><button class="btn btn-sm" style="margin-top:10px" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar</button></div></div>`;
+  if (mine) h += `<h2 class="h-sec">Sua carta</h2><div class="me-card"><button class="card-btn" data-act="openPlayer" data-pid="${esc(mine.id)}" aria-label="Sua carta, geral ${ovrOf(mine)}">${cardHTML(mine, { destaque: mine.id === mvpId() })}</button><div><div class="game-title" style="font-size:28px">${esc(nomeVis(mine))}</div><div class="sub">${esc(posLabel(mine))}</div><div class="sub small" style="margin-top:6px">${mine.n ? `${plural(mine.tot.jogos, 'jogo', 'jogos')}, ${mine.tot.sets ? Math.round(100 * mine.tot.setsV / mine.tot.sets) + '% dos sets ganhos' : 'sem sets ainda'}` : 'Ainda sem jogos com placar.'}</div><button class="btn btn-sm" style="margin-top:10px" data-act="editPlayer" data-pid="${esc(mine.id)}">Editar</button></div></div>`;
   if (!ps.length) {
     return h + `<div class="empty" style="margin-top:16px"><h3>${FB() ? 'Só você por aqui' : 'Ninguém no elenco'}</h3><p class="sub">${FB() ? 'Mande o link da turma para a galera. Cada um cria a própria carta.' : 'Cadastre cada jogador com uma nota de 40 a 90 em cada fundamento. A carta nasce daí e evolui a cada jogo.'}</p>${FB() ? `<div class="row-wrap"><button class="btn btn-ball" data-act="shareInvite">${ICON.copy}Convidar para a turma</button>${mine ? `<button class="btn" data-act="newGuest">${ICON.plus}Convidado sem conta</button>` : ''}</div>` : (S.canWrite ? `<button class="btn btn-ball" data-act="newPlayer">${ICON.plus}Novo jogador</button>` : '')}</div>`;
   }
-  const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), nome: (a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'), pos: (a, b) => Object.keys(POS).indexOf(a.pos) - Object.keys(POS).indexOf(b.pos) || ovrOf(b) - ovrOf(a) };
+  const sorters = { ovr: (a, b) => ovrOf(b) - ovrOf(a), nome: (a, b) => (nomeVis(a)).localeCompare(nomeVis(b), 'pt-BR'), pos: (a, b) => Object.keys(POS).indexOf(a.pos) - Object.keys(POS).indexOf(b.pos) || ovrOf(b) - ovrOf(a) };
   ps.sort(sorters[S.ui.sort] || sorters.ovr);
   const chip = (k, l) => `<button class="chip" data-act="sort" data-sort="${k}" aria-pressed="${S.ui.sort === k}">${l}</button>`;
   const mvp = mvpId();
@@ -2163,7 +2188,7 @@ function elencoView() {
 }
 
 function rankingView() {
-  let ps = Object.keys(S.players).map(P).filter(Boolean);
+  let ps = Object.keys(S.players).map(P).filter(p => p && !p.temp);
   const social = FB() && privacyOn(), scope = S.ui.rankScope === 'amigos' ? 'amigos' : 'turma';
   if (social && scope === 'amigos') { const ids = new Set([meId(), ...friendIds()]); ps = ps.filter(p => ids.has(p.id)); }
   const sort = ['vit', 'nota'].includes(S.ui.rankSort) ? S.ui.rankSort : 'ovr';
@@ -2178,11 +2203,11 @@ function rankingView() {
   ps.sort(sorters[sort]);
   const val = p => sort === 'ovr' ? `<span class="rk-ovr num">${ovrOf(p)}</span>` : sort === 'vit' ? `<span class="rk-pct num">${p.tot.sets ? Math.round(pct(p) * 100) + '%' : '–'}</span>` : (p.tot.notaN ? `<span class="rt ${rtCls(avg(p))}">${fmtN(avg(p))}</span>` : '<span class="rk-pct">–</span>');
   const trend = p => p.last && p.last.d ? `<span class="nt-d ${p.last.d > 0 ? 'up' : 'down'}">${p.last.d > 0 ? '▲' : '▼'}${Math.abs(p.last.d)}</span>` : '';
-  const nm = p => esc(p.nick || p.name) + (p.id === meId() ? ' <span class="sub small">(você)</span>' : '');
+  const nm = p => esc(nomeVis(p)) + (p.id === meId() ? ' <span class="sub small">(você)</span>' : '');
   let rest = ps;
   if (ps.length >= 3) {
     rest = ps.slice(3);
-    const pod = (p, place) => `<button class="pod-c pod-${place}" data-act="openPlayer" data-pid="${esc(p.id)}" aria-label="${place}º lugar: ${esc(p.nick || p.name)}">${place === 1 ? `<span class="pod-crown">${CROWN_SVG}</span>` : ''}<span class="pod-av">${avatar(p)}</span><b class="pod-nm">${nm(p)}</b>${val(p)}<span class="pod-base num">${place}</span></button>`;
+    const pod = (p, place) => `<button class="pod-c pod-${place}" data-act="openPlayer" data-pid="${esc(p.id)}" aria-label="${place}º lugar: ${esc(nomeVis(p))}">${place === 1 ? `<span class="pod-crown">${CROWN_SVG}</span>` : ''}<span class="pod-av">${avatar(p)}</span><b class="pod-nm">${nm(p)}</b>${val(p)}<span class="pod-base num">${place}</span></button>`;
     h += `<div class="podium">${pod(ps[1], 2)}${pod(ps[0], 1)}${pod(ps[2], 3)}</div>`;
   }
   if (rest.length) h += `<div class="list rank-list">${rest.map((p, i) => `<button class="item rk-row${p.id === meId() ? ' rk-me' : ''}" data-act="openPlayer" data-pid="${esc(p.id)}"><span class="rk-pos num">${i + (ps.length >= 3 ? 4 : 1)}</span>${avatar(p)}<span class="item-main"><span class="item-title">${nm(p)}</span><span class="item-sub">${esc((POS[p.pos] || POS.cor).name)}</span></span>${trend(p)}${val(p)}</button>`).join('')}</div>`;
@@ -2274,7 +2299,7 @@ function presencaStep(g, confN) {
   const W = canEditGame(g);
   const conf = confOrder(g);
   const confSet = new Set(conf);
-  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id) && isActive(p.id) && invitedTo(g, p) && (!privacyOn() || p.known)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
+  const others = Object.keys(S.players).map(P).filter(p => !avulsoFora(p, g) && !confSet.has(p.id) && isActive(p.id) && invitedTo(g, p) && (!privacyOn() || p.known)).sort((a, b) => (nomeVis(a)).localeCompare(nomeVis(b), 'pt-BR'));
   const max = g.max || Infinity;
   const wait = Math.max(0, conf.length - max);
   const paid = g.paid.filter(id => confSet.has(id)).length;
@@ -2283,10 +2308,10 @@ function presencaStep(g, confN) {
   h += `<div class="row-wrap" style="margin-bottom:12px"><button class="btn btn-sm btn-ball" data-act="openInvite">${ICON.plus}Convidar</button><button class="btn btn-sm" data-act="openAgenda">${ICON.cal}Agendar</button>${FBM() && W && !g.aberto && g.status !== 'encerrado' ? '<button class="btn btn-sm" data-act="abrirVagas">Abrir vagas</button>' : ''}</div>` + abertoAdminHTML(g);
   const row = (p, i, on) => `<div class="pres${p.id === meId() ? ' pres-me' : ''}">
     <span class="pres-n">${on ? i + 1 : ''}</span>${avatar(p)}
-    <div class="item-main"><div class="item-title">${esc(p.nick || p.name)} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
+    <div class="item-main"><div class="item-title">${esc(nomeVis(p))} <span class="num pres-ovr">${ovrOf(p)}</span></div><div class="item-sub">${esc(posLabel(p))}${on && i >= max ? ' <span class="wait">Espera</span>' : ''}</div></div>
     ${on && !W && FB() && privacyOn() && canFriend(p.id) && friendState(p.id) !== 'friend' ? friendBtn(p.id) : ''}
-    ${on && W && cobraNoJogo(g) ? `<button class="paid paid-ic" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(p.nick || p.name)} pagou">${g.paid.includes(p.id) ? CHECK_SVG : 'R$'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
-    ${W || (FB() && p.id === meId()) ? `${p.id === meId() ? `<button class="toggle tg-me" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Desmarcar' : 'Vou'}</button>` : `<button class="toggle tg-ic" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}" aria-label="${on ? 'Desmarcar' : 'Confirmar'} ${esc(p.nick || p.name)}"><span class="tg-c">${on ? CHECK_SVG : ''}</span><span class="sr">${on ? 'Vai' : 'Confirmar'}</span></button>`}` : ''}
+    ${on && W && cobraNoJogo(g) ? `<button class="paid paid-ic" data-act="togglePaid" data-pid="${esc(p.id)}" aria-pressed="${g.paid.includes(p.id)}" aria-label="${esc(nomeVis(p))} pagou">${g.paid.includes(p.id) ? CHECK_SVG : 'R$'}</button>` : (on && g.paid.includes(p.id) ? '<span class="pill">Pagou</span>' : '')}
+    ${W || (FB() && p.id === meId()) ? `${p.id === meId() ? `<button class="toggle tg-me" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}">${on ? 'Desmarcar' : 'Vou'}</button>` : `<button class="toggle tg-ic" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="${on}" aria-label="${on ? 'Desmarcar' : 'Confirmar'} ${esc(nomeVis(p))}"><span class="tg-c">${on ? CHECK_SVG : ''}</span><span class="sr">${on ? 'Vai' : 'Confirmar'}</span></button>`}` : ''}
   </div>`;
   if (conf.length) h += listBox(conf.map((id, i) => row(P(id), i, true)));
   const shownOthers = W ? others : others.filter(p => p.id === meId() && canJoinGame(g));
@@ -2322,7 +2347,7 @@ function timesStep(g) {
     ${t.filter(P).map(id => {
       const p = P(id), out = g.leave[id] != null, jn = g.join[id];
       const tag = out ? `<span class="tp-tag">saiu depois do set ${g.leave[id]}</span>` : (jn ? `<span class="tp-tag">entrou no set ${jn + 1}</span>` : '');
-      return `<button class="tp ${out ? 'tp-out' : ''}" data-act="${started ? 'leaveAsk' : 'swapPick'}" data-pid="${esc(id)}" aria-pressed="${!started && S.ui.swapSel === id}" ${W ? '' : 'disabled'}><span class="tp-pos">${(POS[p.pos] || POS.cor).abbr}</span><span class="tp-name">${esc(p.nick || p.name)}${tag}</span><span class="tp-ovr">${Math.round(ovrIn(g, id))}</span></button>`;
+      return `<button class="tp ${out ? 'tp-out' : ''}" data-act="${started ? 'leaveAsk' : 'swapPick'}" data-pid="${esc(id)}" aria-pressed="${!started && S.ui.swapSel === id}" ${W ? '' : 'disabled'}><span class="tp-pos">${(POS[p.pos] || POS.cor).abbr}</span><span class="tp-name">${esc(nomeVis(p))}${tag}</span><span class="tp-ovr">${Math.round(ovrIn(g, id))}</span></button>`;
     }).join('')}
   </div>`).join('')}</div>`;
   h += `<div class="row-wrap" style="margin-top:12px"><button class="btn btn-sm" data-act="copyTeams">${ICON.copy}Copiar times</button><button class="btn btn-sm" data-act="step" data-step="sumula">Ir para a súmula</button></div>`;
@@ -2440,7 +2465,7 @@ function rateHTML(g) {
   if (!others.length) return '';
   const mine = (g.rates || {})[meId()] || {}, done = others.filter(id => mine[id]).length;
   if (!rateOpen(g)) return done ? section('Nota da galera', `<p class="sub">Você deu nota para ${done} de ${others.length}. A avaliação já fechou.</p>`) : '';
-  const row = id => { const p = P(id), v = mine[id] || 0, nm = p.nick || p.name;
+  const row = id => { const p = P(id), v = mine[id] || 0, nm = nomeVis(p);
     return `<div class="pres rate-row">${avatar(p)}<div class="item-main"><div class="item-title">${esc(nm)}</div></div><div class="stars" role="group" aria-label="Nota para ${esc(nm)}">${[1, 2, 3, 4, 5].map(n => `<button class="star" data-act="rateP" data-gid="${esc(g.id)}" data-pid="${esc(id)}" data-v="${n}" aria-pressed="${v === n}" aria-label="${n} de 5 para ${esc(nm)}">${n}</button>`).join('')}</div></div>`; };
   return `<div id="notagalera">${section('Nota da galera', `<p class="sub" style="margin:-4px 0 10px">Como cada um jogou? 1 é mal, 3 é normal, 5 é muito bem. Com duas notas ou mais, a média mexe um pouco na carta. A tela não mostra quem deu qual nota. Você já deu ${done} de ${others.length}.</p>` + listBox(others.map(row)))}</div>`;
 }
@@ -2455,7 +2480,7 @@ function votingHTML(g) {
       const mine = (g.votes || {})[meId()];
       const cands = teamIds(g).filter(id => id !== meId() && P(id)).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'pt-BR'));
       body = `<p class="sub" style="margin:-4px 0 10px">${mine ? `Você votou em <b>${esc(nameOf(mine))}</b>. Dá para trocar até a votação fechar.` : 'Quem jogou mais nessa partida? O resultado só aparece quando a votação fechar.'} ${nVoted} de ${vs.length} já votaram.</p>`
-        + listBox(cands.map(id => { const p = P(id), on = mine === id; return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)}${teamOfId(g, id) >= 0 ? `, time ${TEAMS[teamOfId(g, id)].name.toLowerCase()}` : ''}</div></div><button class="toggle" data-act="vote" data-id="${esc(g.id)}" data-pid="${esc(id)}" aria-pressed="${on}">${on ? 'Seu voto' : 'Votar'}</button></div>`; }))
+        + listBox(cands.map(id => { const p = P(id), on = mine === id; return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(nomeVis(p))}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)}${teamOfId(g, id) >= 0 ? `, time ${TEAMS[teamOfId(g, id)].name.toLowerCase()}` : ''}</div></div><button class="toggle" data-act="vote" data-id="${esc(g.id)}" data-pid="${esc(id)}" aria-pressed="${on}">${on ? 'Seu voto' : 'Votar'}</button></div>`; }))
         + `<p class="sub small" style="margin-top:8px">${closeTxt}</p>`;
     }
   } else {
@@ -2499,6 +2524,7 @@ function renderSheet() {
   else if (s.type === 'gameForm') { title = s.id ? 'Editar jogo' : 'Novo jogo'; body = !s.id && FB() ? novoJogoHTML() : (s.id && FB() && S.games[s.id] ? editarJogoHTML(s.id) : gameFormHTML(s.id)); }
   else if (s.type === 'playerForm') { const f = S.ui.form || {}; title = f.kind === 'self' ? (f.pid ? 'Editar minha carta' : 'Criar minha carta') : f.kind === 'guest' ? (f.pid ? 'Editar convidado' : 'Novo convidado') : (f.pid ? 'Editar jogador' : 'Novo jogador'); body = playerFormHTML(); }
   else if (s.type === 'perfil') { title = espacoPessoal() ? 'Você' : 'Você e a turma'; body = `<button class="btn btn-block" style="margin-bottom:14px" data-act="convidarAmigos">${ICON.plus}Adicionar amigos</button>` + perfilHTML(); }
+  else if (s.type === 'avulso') { title = 'Jogador avulso'; body = avulsoHTML(); }
   else if (s.type === 'convidarAmigos') { title = 'Convidar amigos'; body = convidarAmigosHTML(); }
   else if (s.type === 'amigoConvite') { const a = S.amigoConvite; if (!a) return closeSheet(); title = 'Convite de amizade'; body = `<p class="sub" style="margin:-4px 0 14px">${esc(a.de || 'Alguém')} te convidou para ser amigo no Manchete. Amigos veem os jogos uns dos outros e aparecem juntos no ranking.</p><button class="btn btn-block btn-ball" data-act="amigoAceitar">Adicionar ${esc(a.de || 'como amigo')}</button><button class="btn btn-block btn-ghost" style="margin-top:8px" data-act="closeSheet">Agora não</button>`; }
   else if (s.type === 'notifs') { title = 'Notificações'; body = notifsHTML(); }
@@ -2783,7 +2809,7 @@ function patchCard(root, p) {
   card.classList.add('t-' + tier.key);
   card.querySelector('.card-ovr b').textContent = ovr;
   card.querySelector('.card-ovr small').textContent = (POS[p.pos] || POS.cor).abbr;
-  card.querySelector('.card-name').textContent = p.nick || p.name;
+  card.querySelector('.card-name').textContent = nomeVis(p);
   card.querySelector('.card-tier').textContent = tier.name;
   card.querySelectorAll('.card-attrs [data-a]').forEach(d => { d.querySelector('b').textContent = Math.round(p.at[d.dataset.a]); });
   const ini = card.querySelector('.card-photo span');
@@ -2949,7 +2975,7 @@ function cleanLine(line) {
   return norm(line).replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(\d+\s*)+/, '').trim();
 }
 function matchList(text) {
-  const idx = Object.values(S.players).map(p => { const name = cleanLine(p.name), nick = cleanLine(p.nick); return { p, name, nick, first: name.split(' ')[0], nickFirst: nick.split(' ')[0] }; });
+  const idx = Object.values(S.players).filter(p => !p.temp).map(p => { const name = cleanLine(p.name), nick = cleanLine(p.nick); return { p, name, nick, first: name.split(' ')[0], nickFirst: nick.split(' ')[0] }; });
   const out = { matched: [], unknown: [], ambiguous: [] };
   for (const raw of String(text || '').split(/\r?\n/)) {
     const t = cleanLine(raw);
@@ -2965,7 +2991,7 @@ function matchList(text) {
     }
     const label = raw.trim().replace(/^[\d\s.\-)–—•*#]+/, '').slice(0, 40);
     if (found) { if (!out.matched.includes(found.id)) out.matched.push(found.id); }
-    else if (amb) out.ambiguous.push({ label, names: amb.map(p => p.nick || p.name) });
+    else if (amb) out.ambiguous.push({ label, names: amb.map(p => nomeVis(p)) });
     else if (!/\d/.test(t) && !/(volei|lista|confirmad|espera|quadra|horario|local)/.test(t)) out.unknown.push(label);
   }
   return out;
@@ -3204,7 +3230,7 @@ function peopleResHTML() {
     const full = x.nick && x.nick !== x.name;
     const sub = st === 'friend' ? 'amigo' : here ? 'está nesta turma' : 'de outra turma';
     const line = full ? `${esc(x.name)}, ${sub}` : sub.charAt(0).toUpperCase() + sub.slice(1);
-    return `<div class="pres">${here ? `<button class="sug-av" data-act="openPlayer" data-pid="${esc(x.uid)}" aria-label="Ver ${esc(x.nick || x.name)}">${avatar(x)}</button>` : avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">${line}</div></div>${friendBtn(x.uid)}</div>`;
+    return `<div class="pres">${here ? `<button class="sug-av" data-act="openPlayer" data-pid="${esc(x.uid)}" aria-label="Ver ${esc(nomeVis(x))}">${avatar(x)}</button>` : avatar(x)}<div class="item-main"><div class="item-title">${esc(nomeVis(x))}</div><div class="item-sub">${line}</div></div>${friendBtn(x.uid)}</div>`;
   }));
 }
 // Pessoas que o app já conhece: todo mundo da turma e os amigos (e amigos dos amigos).
@@ -3262,7 +3288,7 @@ function whoGoingHTML(g) {
   if (!FB() || !privacyOn() || hasResult(g) || !canEditGame(g)) return '';
   const ids = g.conf.filter(id => id !== meId() && P(id) && canFriend(id) && friendState(id) !== 'friend');
   if (!ids.length) return '';
-  return section('Quem vai e ainda não é seu amigo', listBox(ids.map(id => { const p = P(id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)}</div></div>${friendBtn(id)}</div>`; })));
+  return section('Quem vai e ainda não é seu amigo', listBox(ids.map(id => { const p = P(id); return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(nomeVis(p))}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)}</div></div>${friendBtn(id)}</div>`; })));
 }
 
 function startSocial() {
@@ -3476,7 +3502,7 @@ function startPartidas() {
 }
 const partidaWhere = p => (p.turmas.length ? p.turmas.map(t => p.turmaNames[t] || 'Turma').join(' + ') : 'Sem turma');
 const partidaVisTxt = p => (p.vis === 'turma' ? (p.turmas.length > 1 ? 'Todas as turmas' : 'Toda a turma') : p.vis === 'amigos' ? 'Só amigos' : 'Só convidados');
-const pnName = (p, u) => { const r = p.roster[u]; if (r && r.name) return r.nick || r.name; return personName(u) || 'Alguém'; };
+const pnName = (p, u) => { const r = p.roster[u]; if (r && r.name) return nomeVis(r); return personName(u) || 'Alguém'; };
 const pnInfo = (p, u) => p.roster[u] || personalOf(u) || { name: 'Alguém' };
 const myPartida = p => p.createdBy === meId();
 const pSetsWon = p => { let a = 0, b = 0; for (const x of p.sets) { if (x.pa == null || x.pb == null || x.pa === x.pb) continue; if (x.pa > x.pb) a++; else b++; } return [a, b]; };
@@ -3536,7 +3562,7 @@ function partidaInviteHTML(p) {
   for (const [u, x] of Object.entries(S.myMirrors)) if (isFriend(u)) known.set(u, x);
   for (const id of Object.keys(S.players)) { const q = P(id); if (q && !q.guest && q.ownerUid && id !== meId() && q.known !== false) known.set(id, q); }
   const people = [...known.entries()].filter(([u]) => u !== meId()).sort((a, b) => (a[1].nick || a[1].name).localeCompare(b[1].nick || b[1].name, 'pt-BR'));
-  return `<p class="sub" style="margin:-4px 0 10px">Só quem estiver convidado vê a partida e confirma presença.</p>` + (people.length ? listBox(people.map(([u, x]) => { const on = p.allowed.includes(u); return `<div class="pres">${avatar(x)}<div class="item-main"><div class="item-title">${esc(x.nick || x.name)}</div><div class="item-sub">${isFriend(u) ? 'Amigo' : 'Da sua turma'}</div></div><button class="toggle" data-act="pInviteToggle" data-id="${esc(p.id)}" data-uid="${esc(u)}" aria-pressed="${on}">${on ? 'Convidado' : 'Convidar'}</button></div>`; })) : '<p class="sub">Ainda não tem ninguém para convidar. Adicione amigos pelo Elenco.</p>');
+  return `<p class="sub" style="margin:-4px 0 10px">Só quem estiver convidado vê a partida e confirma presença.</p>` + (people.length ? listBox(people.map(([u, x]) => { const on = p.allowed.includes(u); return `<div class="pres">${avatar(x)}<div class="item-main"><div class="item-title">${esc(nomeVis(x))}</div><div class="item-sub">${isFriend(u) ? 'Amigo' : 'Da sua turma'}</div></div><button class="toggle" data-act="pInviteToggle" data-id="${esc(p.id)}" data-uid="${esc(u)}" aria-pressed="${on}">${on ? 'Convidado' : 'Convidar'}</button></div>`; })) : '<p class="sub">Ainda não tem ninguém para convidar. Adicione amigos pelo Elenco.</p>');
 }
 // Quem marcou mantém a lista de quem pode ver em dia: gente nova na turma ou amigos novos passam a ver.
 const AUD_DONE = new Set();
@@ -3644,7 +3670,7 @@ function porqueHTML(g, pid) {
   if (x.sets) rows.push(linha('Resultado do time', `${x.won} de ${x.sets} sets ganhos${x.galera ? '. Com notas da galera, o placar vale metade' : ''}`, pt.placar));
   if (Math.abs(pt.sumula || 0) >= 0.05) rows.push(linha('Lances anotados', 'Pela súmula', pt.sumula));
   const total = (pt.placar || 0) + (pt.galera || 0) + (pt.sumula || 0);
-  let h = `<div class="pq-head">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="sub">Geral ${x.ovrBefore} → <b>${x.ovrAfter}</b></div></div>${val(total)}</div>`;
+  let h = `<div class="pq-head">${avatar(p)}<div class="item-main"><div class="item-title">${esc(nomeVis(p))}</div><div class="sub">Geral ${x.ovrBefore} → <b>${x.ovrAfter}</b></div></div>${val(total)}</div>`;
   h += listBox(rows.length ? rows : [linha('Sem mudança', 'Nada neste jogo mexeu na carta', 0)]);
   const notas = [];
   if (pt.limite) notas.push(`Bateu no limite: a carta muda no máximo ${LIMITE_JOGO} pontos por jogo.`);
@@ -4060,11 +4086,11 @@ function notasSheetHTML(g, i) {
     return `<div style="text-align:center;display:grid;gap:12px;padding:8px 0"><div class="nt-ball">${CHECK_SVG}</div><div class="game-title">Pronto!</div><p class="sub" style="margin:0">Você deu nota para ${dadas} de ${rat.length}. O resultado sai quando a votação fechar: ${esc(fmtFecha(notasFecha(g)))}.</p><button class="btn btn-block btn-ball" data-act="closeSheet">Fechar</button><button class="link-btn quiet" data-act="notasIr" data-i="0">Rever minhas notas</button></div>`;
   }
   const pid = rat[i], p = P(pid), ti = teamOfId(g, pid), v = mine[pid];
-  const nb = n => `<button class="nt-n" data-act="notaDar" data-v="${n}" aria-pressed="${v === n}" aria-label="Nota ${n} para ${esc(p.nick || p.name)}">${n}</button>`;
+  const nb = n => `<button class="nt-n" data-act="notaDar" data-v="${n}" aria-pressed="${v === n}" aria-label="Nota ${n} para ${esc(nomeVis(p))}">${n}</button>`;
   return `<div class="row" style="align-items:center;margin:-6px 0 6px"><button class="btn btn-sm btn-ghost" data-act="notasIr" data-i="${Math.max(0, i - 1)}" ${i ? '' : 'disabled'}>‹ Anterior</button><span class="spacer"></span><span class="sub small"><b>${i + 1}</b> de ${rat.length}</span><span class="spacer"></span><button class="link-btn quiet" data-act="notasIr" data-i="${i + 1}">Pular</button></div>
     <div class="pay-bar"><i style="width:${Math.round(100 * (i + 1) / rat.length)}%"></i></div>
-    <div style="text-align:center;display:grid;gap:4px;margin:14px 0 10px"><div class="nt-av">${avatar(p)}</div><div class="game-title" style="font-size:28px">${esc(p.nick || p.name)}</div><div class="sub">${esc(posLabel(p))}${ti >= 0 ? `, time ${TEAMS[ti].name.toLowerCase()}` : ''}</div></div>
-    <p style="text-align:center;font-weight:600;margin:0 0 10px">Que nota ${esc(p.nick || p.name)} merece hoje?</p>
+    <div style="text-align:center;display:grid;gap:4px;margin:14px 0 10px"><div class="nt-av">${avatar(p)}</div><div class="game-title" style="font-size:28px">${esc(nomeVis(p))}</div><div class="sub">${esc(posLabel(p))}${ti >= 0 ? `, time ${TEAMS[ti].name.toLowerCase()}` : ''}</div></div>
+    <p style="text-align:center;font-weight:600;margin:0 0 10px">Que nota ${esc(nomeVis(p))} merece hoje?</p>
     <div class="nt-grid">${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(nb).join('')}<button class="nt-n nt-nv" data-act="notaDar" data-v="-1" aria-pressed="${v === -1}">Não vi</button></div>
     <div class="row sub small" style="margin-top:8px"><span>0: sumiu</span><span class="spacer"></span><span>5: normal</span><span class="spacer"></span><span>10: monstro</span></div>
     <p class="sub small" style="text-align:center;margin-top:8px">Tocou, já vai para o próximo. Dá para mudar até a votação fechar.</p>`;
@@ -4091,10 +4117,130 @@ function maoHTML(g, teams, ids) {
   h += `<div class="pay-sec">${sem ? `Sem time, ${sem}` : 'Todo mundo tem time'}</div>`;
   h += listBox(gente.map(id => {
     const p = P(id), at = idx(id);
-    return `<div class="pres nm-row">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)} · ${ovrOf(p)}</div></div><div class="nm-cores" role="group" aria-label="Time de ${esc(nameOf(id))}">${teams.map((t, i) => `<button class="nm-cor" style="--c:${TEAMS[i].c};--k:${i === 0 ? '#2E2300' : '#FFFFFF'}" data-act="teamSet" data-pid="${esc(id)}" data-t="${i}" aria-pressed="${at === i}" aria-label="${esc(nameOf(id))} no time ${TEAMS[i].name.toLowerCase()}">${at === i ? ICON_CHECK : ''}</button>`).join('')}</div></div>`;
+    return `<div class="pres nm-row">${avatar(p)}<div class="item-main"><div class="item-title">${esc(nomeVis(p))}</div><div class="item-sub">${esc((POS[p.pos] || POS.cor).name)} · ${ovrOf(p)}</div></div><div class="nm-cores" role="group" aria-label="Time de ${esc(nameOf(id))}">${teams.map((t, i) => `<button class="nm-cor" style="--c:${TEAMS[i].c};--k:${i === 0 ? '#2E2300' : '#FFFFFF'}" data-act="teamSet" data-pid="${esc(id)}" data-t="${i}" aria-pressed="${at === i}" aria-label="${esc(nameOf(id))} no time ${TEAMS[i].name.toLowerCase()}">${at === i ? ICON_CHECK : ''}</button>`).join('')}</div></div>`;
   }));
   return h;
 }
+// ================= Escalação em quadra e jogador avulso =================
+// Zonas do vôlei: 4, 3 e 2 na rede; 5, 6 e 1 no fundo; quem está na 1 saca primeiro.
+// 6x0: todo mundo faz tudo; os mais fortes ficam em zonas opostas (2 e 5, 4 e 1, 3 e 6), para sempre ter um na rede.
+// 4x2: dois levantadores em diagonal (1 e 4), levanta quem está na rede.
+// 5x1: levantador na 1, ponteiro na 2, central na 3, oposto na 4, ponteiro na 5, central na 6; o líbero fica no fundo no lugar do central.
+const SISTEMAS = {
+  '6x0': { nome: '6x0', sub: 'Todo mundo levanta, ataca e defende. Os mais fortes ficam em lados opostos, para sempre ter um deles na rede.', papeis: [null, null, null, null, null, null] },
+  '4x2': { nome: '4x2', sub: 'Dois levantadores em diagonal: levanta quem estiver na rede. Os outros quatro atacam.', papeis: ['lev', 'pon', 'cen', 'lev', 'pon', 'cen'] },
+  '5x1': { nome: '5x1', sub: 'Um levantador para o jogo todo, o oposto na diagonal dele, dois ponteiros e dois centrais. Havendo líbero, ele fica no fundo no lugar do central.', papeis: ['lev', 'pon', 'cen', 'opo', 'pon', 'cen'] }
+};
+const PAPEL_TAG = { lev: 'LEV', pon: 'PON', cen: 'CEN', opo: 'OPO', lib: 'LÍB' };
+function cleanEscalacao(e) {
+  if (!e || typeof e !== 'object' || !Array.isArray(e.t)) return null;
+  return {
+    sistema: SISTEMAS[e.sistema] ? e.sistema : '6x0', at: Number(e.at) || 0,
+    t: e.t.slice(0, 4).map(x => ({ z: Array.from({ length: 6 }, (_, i) => (x && Array.isArray(x.z) && typeof x.z[i] === 'string') ? x.z[i].slice(0, 80) : ''), b: x && Array.isArray(x.b) ? x.b.filter(v => typeof v === 'string').slice(0, 30) : [] }))
+  };
+}
+function papeisDe(sis, ids) {
+  const p = SISTEMAS[sis].papeis.slice();
+  if (sis !== '6x0' && ids.some(id => P(id) && P(id).pos === 'lib')) p[5] = 'lib';
+  return p;
+}
+function encaixe(p, papel) {
+  if (!papel) return 0;
+  const at = p.at || {}, p2 = p.pos2 || [];
+  const atr = { lev: at.lev, cen: at.blo, opo: at.ata, pon: ((at.rec || 0) + (at.ata || 0)) / 2, lib: at.def }[papel] || 0;
+  let rel = p.pos === papel ? 3 : p2.includes(papel) ? 2 : 0;
+  if (!rel && ((papel === 'opo' && p.pos === 'pon') || (papel === 'pon' && p.pos === 'opo'))) rel = 1;
+  if (!rel && p.pos === 'cor') rel = 0.8;
+  if (p.pos === 'lib' && papel !== 'lib') rel = -2;
+  return rel + atr / 100;
+}
+function escalarTime(ids, sis) {
+  const gente = ids.filter(id => P(id));
+  if (sis === '6x0') {
+    const tit = gente.slice(0, 6).map(P).sort((a, b) => ovrOf(b) - ovrOf(a)), z = Array(6).fill('');
+    [2, 5, 4, 1, 3, 6].forEach((zona, i) => { if (tit[i]) z[zona - 1] = tit[i].id; });
+    return { z, b: gente.slice(6) };
+  }
+  const papeis = papeisDe(sis, gente), ps = gente.map(P);
+  const grupos = [];
+  if (ps.length <= 6) grupos.push(ps);
+  else if (ps.length <= 9) { const k = 6, n = ps.length, idx = [...Array(k).keys()]; for (;;) { grupos.push(idx.map(i => ps[i])); let i = k - 1; while (i >= 0 && idx[i] === n - k + i) i--; if (i < 0) break; idx[i]++; for (let j = i + 1; j < k; j++) idx[j] = idx[j - 1] + 1; } }
+  else grupos.push(ps.slice().sort((a, b) => ovrOf(b) - ovrOf(a)).slice(0, 6));
+  let melhor = null;
+  const perm = (arr, l, f) => { if (l === arr.length) return f(arr); for (let i = l; i < arr.length; i++) { [arr[l], arr[i]] = [arr[i], arr[l]]; perm(arr, l + 1, f); [arr[l], arr[i]] = [arr[i], arr[l]]; } };
+  for (const g of grupos) {
+    const itens = g.concat(Array(Math.max(0, 6 - g.length)).fill(null));
+    perm(itens, 0, a => {
+      let sc = 0;
+      a.forEach((p, i) => { sc += p ? encaixe(p, papeis[i]) * (papeis[i] === 'lev' ? 1.6 : 1) : (i === 5 ? 0.3 : i === 4 ? 0.2 : 0); });
+      if (!melhor || sc > melhor.sc + 1e-9) melhor = { sc, z: a.map(p => p ? p.id : '') };
+    });
+  }
+  const em = new Set(melhor.z.filter(Boolean));
+  return { z: melhor.z, b: gente.filter(id => !em.has(id)) };
+}
+function gerarEscalacao(g, sis) {
+  const teams = (g.teams || []).map(t => t.filter(id => P(id)));
+  return { sistema: sis, at: Date.now(), t: teams.map(t => escalarTime(t, sis)) };
+}
+function escalacaoVelha(g) {
+  const e = g.escalacao; if (!e) return false;
+  const teams = (g.teams || []).map(t => t.filter(id => P(id)));
+  if (e.t.length !== teams.length) return true;
+  return teams.some((t, i) => { const tem = new Set([...e.t[i].z.filter(Boolean), ...e.t[i].b]); return t.length !== tem.size || t.some(id => !tem.has(id)); });
+}
+function escPessoa(g, ti, id, zona, papel, W) {
+  if (!id || !P(id)) return `<div class="esc-p esc-vazio"><span class="esc-z">${zona}</span></div>`;
+  const p = P(id), sel = S.ui.escSel && S.ui.escSel.t === ti && S.ui.escSel.id === id;
+  const nome = String(nomeVis(p)).replace(' (avulso)', '').split(/\s+/)[0];
+  const tag = papel ? PAPEL_TAG[papel] : '';
+  return `<${W ? 'button' : 'div'} class="esc-p${sel ? ' sel' : ''}" ${W ? `data-act="escTroca" data-t="${ti}" data-id="${esc(id)}" aria-pressed="${sel}" aria-label="${esc(nameOf(id))}, posição ${zona}${tag ? ', ' + tag : ''}"` : ''} style="--c:${TEAMS[ti].c}"><span class="esc-z">${zona}</span>${avatar(p)}<span class="esc-n">${esc(nome)}${p.temp ? '<i>avulso</i>' : ''}</span>${tag || zona === 1 ? `<span class="esc-tag">${zona === 1 ? (tag ? tag + ' · saca' : 'Saca') : tag}</span>` : ''}</${W ? 'button' : 'div'}>`;
+}
+function escMeiaQuadra(g, e, ti, W, invertida) {
+  const t = e.t[ti], papeis = papeisDe(e.sistema, [...t.z, ...t.b].filter(Boolean));
+  const cel = z => escPessoa(g, ti, t.z[z - 1], z, papeis[z - 1], W);
+  const rede = [4, 3, 2].map(cel).join(''), fundo = [5, 6, 1].map(cel).join('');
+  const redeInv = [2, 3, 4].map(cel).join(''), fundoInv = [1, 6, 5].map(cel).join('');
+  return invertida ? `<div class="esc-lin">${fundoInv}</div><div class="esc-ata"></div><div class="esc-lin">${redeInv}</div>` : `<div class="esc-lin">${rede}</div><div class="esc-ata"></div><div class="esc-lin">${fundo}</div>`;
+}
+function escBanco(g, e, ti, W) {
+  const b = e.t[ti].b.filter(id => P(id)); if (!b.length) return '';
+  return `<div class="esc-banco"><span class="team-dot" style="background:${TEAMS[ti].c}"></span><span class="sub small">Banco, entram no rodízio:</span>${b.map(id => W ? `<button class="chip esc-bchip${S.ui.escSel && S.ui.escSel.id === id ? ' sel' : ''}" data-act="escTroca" data-t="${ti}" data-id="${esc(id)}">${esc(nameOf(id))}</button>` : `<span class="chip">${esc(nameOf(id))}</span>`).join('')}</div>`;
+}
+function escalacaoHTML(g) {
+  const teams = (g.teams || []).map(t => t.filter(id => P(id)));
+  if (teams.filter(t => t.length).length < 2) return '';
+  const W = canEditGame(g), e = g.escalacao && g.escalacao.t.length === teams.length ? g.escalacao : null;
+  const sis = S.ui.sistema || (e && e.sistema) || '6x0';
+  let h = `<div class="esc-head"><h2 class="h-sec" style="margin:0">Posições em quadra</h2></div>`;
+  h += W ? `<div class="seg seg-full" style="grid-template-columns:repeat(3,1fr);margin:10px 0 6px" role="group" aria-label="Sistema de jogo">${Object.keys(SISTEMAS).map(k => `<button data-act="escSis" data-v="${k}" aria-pressed="${sis === k}">${k}</button>`).join('')}</div>` : `<div class="sub small" style="margin:6px 0">Sistema ${esc(sis)}</div>`;
+  h += `<p class="sub small" style="margin:0 2px 10px">${esc(SISTEMAS[sis].sub)}</p>`;
+  const velha = e && escalacaoVelha(g);
+  if (!e || velha || (e && e.sistema !== sis)) {
+    if (velha) h += `<p class="sub small" style="margin:0 2px 8px">Os times mudaram desde a última escalação.</p>`;
+    if (W) h += `<button class="btn btn-block btn-ball" data-act="escGerar">${e ? 'Gerar posições de novo' : 'Gerar posições'}</button>`;
+    else if (!e) h += `<p class="sub">Quem organiza ainda não gerou as posições.</p>`;
+    if (!e) return `<section class="esc">${h}</section>`;
+  }
+  if (e.t.length === 2) h += `<div class="esc-quadra"><div class="esc-meia">${escMeiaQuadra(g, e, 0, W, true)}</div><div class="esc-rede" aria-hidden="true"></div><div class="esc-meia">${escMeiaQuadra(g, e, 1, W, false)}</div></div>`;
+  else h += e.t.map((t, ti) => `<div class="esc-time"><div class="row" style="gap:6px;align-items:center;margin:10px 2px 6px"><span class="team-dot" style="background:${TEAMS[ti].c}"></span><b>Time ${TEAMS[ti].name.toLowerCase()}</b></div><div class="esc-quadra"><div class="esc-rede" aria-hidden="true"></div><div class="esc-meia">${escMeiaQuadra(g, e, ti, W, false)}</div></div></div>`).join('');
+  h += e.t.map((t, ti) => escBanco(g, e, ti, W)).join('');
+  if (W) h += `<p class="sub small" style="margin:8px 2px 0">Toque em dois jogadores do mesmo time para trocar de lugar.</p>`;
+  return `<section class="esc">${h}</section>`;
+}
+function avulsoHTML() {
+  const g = curGame(); if (!g) return '';
+  const T = g.nTeams || 2, teams = g.teams && g.teams.length === T ? g.teams : Array.from({ length: T }, () => []);
+  const menor = teams.map((t, i) => [t.length, i]).sort((a, b) => a[0] - b[0])[0][1];
+  return `<p class="sub" style="margin:-4px 0 14px">Para quem veio jogar hoje e não tem o app. A carta vale só para este jogo: entra no time, recebe nota da galera e não aparece no Elenco nem no Ranking.</p>
+  <label class="field"><span>Nome</span><input class="input" id="avNome" maxlength="40" placeholder="Ex.: Carlos" autocomplete="off"></label>
+  <div class="field"><span>Posição</span><div class="nj-mini" role="group" aria-label="Posição">${Object.keys(POS).map(k => `<button class="mc" data-act="avOpc" data-g="pos" data-v="${k}" aria-pressed="${k === 'cor'}">${esc(POS[k].name)}</button>`).join('')}</div></div>
+  <div class="field"><span>Nível</span><div class="nj-mini" role="group" aria-label="Nível">${Object.keys(LEVELS).map(k => `<button class="mc" data-act="avOpc" data-g="nivel" data-v="${k}" aria-pressed="${k === 'exp'}">${esc(LEVELS[k].name)}</button>`).join('')}</div></div>
+  <div class="field"><span>Entra no time</span><div class="nj-mini" role="group" aria-label="Time">${teams.map((t, i) => `<button class="mc" data-act="avOpc" data-g="time" data-v="${i}" aria-pressed="${i === menor}"><span class="team-dot" style="background:${TEAMS[i].c};margin-right:6px"></span>${TEAMS[i].name}</button>`).join('')}<button class="mc" data-act="avOpc" data-g="time" data-v="-1" aria-pressed="false">Ainda não</button></div></div>
+  <div id="fErr" class="err" role="alert"></div>
+  <button class="btn btn-block btn-ball" style="margin-top:6px" data-act="avulsoSalvar">Adicionar ao jogo</button>`;
+}
+
 function timesStep2(g) {
   const W = canEditGame(g), ids = playingIds(g), T = g.nTeams || 2;
   const mode = S.ui.teamMode || 'mao';
@@ -4113,8 +4259,10 @@ function timesStep2(g) {
   else if (W && mode === 'mao') h += maoHTML(g, teams, ids);
   else if (W && pool.length) h += `<div class="pay-sec">Sem time, ${pool.length}</div><div class="row-wrap">${pool.map(id => `<button class="chip nt-pool" data-act="teamAdd" data-pid="${esc(id)}">+ ${esc(nameOf(id))}</button>`).join('')}</div><p class="sub small" style="margin-top:6px">Tocou, vai para o time com menos gente.</p>`;
   if ((filled.length || mode !== 'capitaes') && !(W && mode === 'mao')) h += `<div class="teams" style="margin-top:12px">${teams.map((t, i) => `<div class="team"><div class="team-head"><span class="team-dot" style="background:${TEAMS[i].c}"></span><span class="team-name">Time ${TEAMS[i].name.toLowerCase()}</span>${t.length ? `<span class="sub small">${teamHeight(t)}média</span>` : ''}<span class="team-avg">${t.length ? fmtN(teamAvg(t, g)) : ''}</span></div>
-    ${t.filter(P).map(id => { const p = P(id); return `<div class="nt-tp"><button class="tp" data-act="teamMove" data-pid="${esc(id)}" ${W && mode !== 'capitaes' ? '' : 'disabled'} aria-label="${esc(nameOf(id))}: mudar de time"><span class="tp-pos">${(POS[p.pos] || POS.cor).abbr}</span><span class="tp-name">${esc(p.nick || p.name)}</span><span class="tp-ovr num">${ovrOf(p)}</span></button>${W && mode !== 'capitaes' ? `<button class="icon-btn" data-act="teamOut" data-pid="${esc(id)}" aria-label="Tirar ${esc(nameOf(id))} do time">${ICON.x}</button>` : ''}</div>`; }).join('') || '<p class="sub small" style="padding:8px 12px;margin:0">Ninguém ainda.</p>'}</div>`).join('')}</div>`;
+    ${t.filter(P).map(id => { const p = P(id); return `<div class="nt-tp"><button class="tp" data-act="teamMove" data-pid="${esc(id)}" ${W && mode !== 'capitaes' ? '' : 'disabled'} aria-label="${esc(nameOf(id))}: mudar de time"><span class="tp-pos">${(POS[p.pos] || POS.cor).abbr}</span><span class="tp-name">${esc(nomeVis(p))}</span><span class="tp-ovr num">${ovrOf(p)}</span></button>${W && mode !== 'capitaes' ? `<button class="icon-btn" data-act="teamOut" data-pid="${esc(id)}" aria-label="Tirar ${esc(nameOf(id))} do time">${ICON.x}</button>` : ''}</div>`; }).join('') || '<p class="sub small" style="padding:8px 12px;margin:0">Ninguém ainda.</p>'}</div>`).join('')}</div>`;
   if (filled.length >= 2) h += `<div class="row-wrap" style="margin-top:12px"><button class="btn btn-sm" data-act="copyTeams">${ICON.copy}Copiar times</button>${W ? '<button class="btn btn-sm btn-ball" data-act="step" data-step="jogo">Times prontos</button>' : ''}</div>`;
+  if (W && !g.sets.length) h += `<button class="btn btn-block" style="margin-top:14px" data-act="avulsoNovo">${ICON.plus}Jogador avulso, sem app</button>`;
+  h += escalacaoHTML(g);
   return h;
 }
 function capitaesHTML(g, teams, pool) {
@@ -4235,7 +4383,7 @@ function redeIds() {
 const visitantesDe = g => confOrder(g).filter(id => P(id) && P(id).visitor);
 function abertoPublico(g) {
   const a = g.aberto, me = myBasic(), prev = S.abertos[g.id];
-  const d = { turma: S.turmaId, turmaNome: (S.turma && S.turma.name) || '', gid: g.id, createdBy: meId(), orgName: String(me.nick || me.name || 'Quem organiza').split(' ')[0],
+  const d = { turma: S.turmaId, turmaNome: (S.turma && S.turma.name) || '', gid: g.id, createdBy: meId(), orgName: String(nomeVis(me) || 'Quem organiza').split(' ')[0],
     vis: a.vis, rede: a.vis === 'rede' ? redeIds() : [], date: g.date, time: g.time, place: a.quadra || g.place || '', endereco: a.endereco, lat: a.lat, lng: a.lng,
     nivel: a.nivel, preco: a.preco, vagas: a.vagas, max: g.max || 0, conf: confOrder(g).length, visit: visitantesDe(g).length, prazo: cutoffOf(g), updated: Date.now() };
   d.congelado = prev && prev.congelado ? prev.congelado : 0;
@@ -4282,10 +4430,10 @@ function abertoAdminHTML(g) {
   let h = `<div class="ab-card" style="margin-top:12px"><div class="row" style="gap:8px;align-items:center"><span class="pst pst-warn">Aberto</span><b>${a.vis === 'rede' ? 'Só a sua rede' : 'Todo mundo do app'}</b></div>
     <p class="sub small" style="margin:0">${plural(a.vagas, 'vaga aberta', 'vagas abertas')} para quem é de fora, ${abertoLivres(pub)} ${abertoLivres(pub) === 1 ? 'livre' : 'livres'} agora. ${esc(precoTxt(pub))}.</p>
     <div class="row" style="gap:8px"><button class="btn btn-sm" style="flex:1" data-act="abrirVagas">Mudar</button><button class="btn btn-sm" style="flex:1" data-act="askFecharVagas">Fechar as vagas</button></div></div>`;
-  if (pend.length) h += `<div class="pay-sec">Pedidos de vaga, ${pend.length}</div>` + listBox(pend.map(pe => `<div class="pres">${avatar(cleanProfile({ name: pe.name, photo: pe.photo }))}<div class="item-main"><div class="item-title">${esc(pe.nick || pe.name || 'Alguém')}${isFriend(pe.uid) ? ' <span class="ptag">Amigo</span>' : ''}</div><div class="item-sub">${esc(POS[pe.pos] ? POS[pe.pos].name : 'Posição livre')}${LEVELS[pe.level] ? ', ' + esc(LEVELS[pe.level].name.toLowerCase()) : ''}</div></div><button class="btn btn-sm" data-act="pedidoNo" data-uid="${esc(pe.uid)}">Recusar</button><button class="btn btn-sm btn-ball" data-act="pedidoOk" data-uid="${esc(pe.uid)}">Aprovar</button></div>`));
+  if (pend.length) h += `<div class="pay-sec">Pedidos de vaga, ${pend.length}</div>` + listBox(pend.map(pe => `<div class="pres">${avatar(cleanProfile({ name: pe.name, photo: pe.photo }))}<div class="item-main"><div class="item-title">${esc(nomeVis(pe) || 'Alguém')}${isFriend(pe.uid) ? ' <span class="ptag">Amigo</span>' : ''}</div><div class="item-sub">${esc(POS[pe.pos] ? POS[pe.pos].name : 'Posição livre')}${LEVELS[pe.level] ? ', ' + esc(LEVELS[pe.level].name.toLowerCase()) : ''}</div></div><button class="btn btn-sm" data-act="pedidoNo" data-uid="${esc(pe.uid)}">Recusar</button><button class="btn btn-sm btn-ball" data-act="pedidoOk" data-uid="${esc(pe.uid)}">Aprovar</button></div>`));
   const vis = visitantesDe(g);
   if (vis.length) {
-    h += `<div class="pay-sec">Visitantes confirmados</div>` + listBox(vis.map(id => { const p = P(id), pe = (S.pedidosOrg[g.id] || {})[p.visitor] || {}; return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">Visitante, ${esc(posLabel(p).toLowerCase())}</div></div>${pe.convite ? '<span class="ptag">Chamado</span>' : `<button class="link-btn" data-act="chamarTurma" data-uid="${esc(p.visitor)}">Chamar para a turma</button>`}</div>`; }));
+    h += `<div class="pay-sec">Visitantes confirmados</div>` + listBox(vis.map(id => { const p = P(id), pe = (S.pedidosOrg[g.id] || {})[p.visitor] || {}; return `<div class="pres">${avatar(p)}<div class="item-main"><div class="item-title">${esc(nomeVis(p))}</div><div class="item-sub">Visitante, ${esc(posLabel(p).toLowerCase())}</div></div>${pe.convite ? '<span class="ptag">Chamado</span>' : `<button class="link-btn" data-act="chamarTurma" data-uid="${esc(p.visitor)}">Chamar para a turma</button>`}</div>`; }));
     h += '<p class="sub small" style="margin-top:6px">Visitante tem carta própria nesta turma, que muda com o jogo, mas só entra na turma se alguém chamar.</p>';
   }
   return h;
@@ -4571,7 +4719,7 @@ function presencaPay(g) {
   const cut = cutoffOf(g), past = Date.now() > cut, key = id => payKeyOf(g, id);
   const charged = id => mens.has(id) || past;
   const confSet = new Set(g.conf);
-  const others = Object.keys(S.players).map(P).filter(p => !confSet.has(p.id) && isActive(p.id) && invitedTo(g, p) && (!privacyOn() || p.known)).sort((a, b) => (a.nick || a.name).localeCompare(b.nick || b.name, 'pt-BR'));
+  const others = Object.keys(S.players).map(P).filter(p => !avulsoFora(p, g) && !confSet.has(p.id) && isActive(p.id) && invitedTo(g, p) && (!privacyOn() || p.known)).sort((a, b) => (nomeVis(a)).localeCompare(nomeVis(b), 'pt-BR'));
   const late = admin ? Object.entries(S.rosters[g.id] || {}).filter(([id]) => !g.conf.includes(id) && P(id) && !mens.has(id) && leftLate(g, id)).map(([id]) => id) : [];
   let h = '';
   if (admin) {
@@ -4595,7 +4743,7 @@ function presencaPay(g) {
     if (admin) right = mode === 'wait' ? '<span class="ptag">Espera</span>' : (!charged(id) ? '<span class="pst pst-mute">Provisório</span>' : payChip(id, key(id)));
     else if (!me && FB() && privacyOn() && canFriend(id) && friendState(id) !== 'friend') right = friendBtn(id);
     const tog = me && mode !== 'late' ? `<button class="toggle" data-act="togglePres" data-pid="${esc(id)}" aria-pressed="true">Desmarcar</button>` : (W && !admin && mode !== 'late' ? `<button class="toggle" data-act="togglePres" data-pid="${esc(id)}" aria-pressed="true">Vai</button>` : '');
-    return `<div class="pres"><span class="pres-n">${n}</span>${avatar(p)}<div class="item-main"><div class="item-title">${me ? 'Você' : esc(p.nick || p.name)}</div><div class="item-sub">${esc(posLabel(p))}, ${kind(id)}${mode === 'late' ? ', desistiu depois do prazo' : ''}</div></div>${right}${tog}</div>`;
+    return `<div class="pres"><span class="pres-n">${n}</span>${avatar(p)}<div class="item-main"><div class="item-title">${me ? 'Você' : esc(nomeVis(p))}</div><div class="item-sub">${esc(posLabel(p))}, ${kind(id)}${mode === 'late' ? ', desistiu depois do prazo' : ''}</div></div>${right}${tog}</div>`;
   };
   const block = (title, ids, mode) => { const vis = ids.filter(show); if (!ids.length || (admin && f && !vis.length)) return ''; return `<div class="pay-sec">${title}</div>` + listBox(vis.map(id => row(id, mode === 'wait' || mode === 'late' ? '–' : spots.indexOf(id) + 1, mode))); };
   h += block('Mensalistas, vaga garantida', spots.filter(id => mens.has(id)), 'in');
@@ -4604,7 +4752,7 @@ function presencaPay(g) {
   if (!f) h += block('Lista de espera', wait, 'wait');
   if (admin && f && !spots.concat(late).some(show)) h += '<p class="sub" style="margin-top:12px">Ninguém nessa situação.</p>';
   const shownOthers = W ? others : others.filter(p => p.id === meId() && canJoinGame(g));
-  if (shownOthers.length && !f) h += section(W ? 'Ainda não confirmaram' : 'Você', listBox(shownOthers.map(p => `<div class="pres"><span class="pres-n"></span>${avatar(p)}<div class="item-main"><div class="item-title">${esc(p.nick || p.name)}</div><div class="item-sub">${esc(posLabel(p))}, ${kind(p.id)}</div></div><button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="false">${p.id === meId() ? 'Vou' : 'Confirmar'}</button></div>`)));
+  if (shownOthers.length && !f) h += section(W ? 'Ainda não confirmaram' : 'Você', listBox(shownOthers.map(p => `<div class="pres"><span class="pres-n"></span>${avatar(p)}<div class="item-main"><div class="item-title">${esc(nomeVis(p))}</div><div class="item-sub">${esc(posLabel(p))}, ${kind(p.id)}</div></div><button class="toggle" data-act="togglePres" data-pid="${esc(p.id)}" aria-pressed="false">${p.id === meId() ? 'Vou' : 'Confirmar'}</button></div>`)));
   if (FB() && !W) h += `<p class="sub small" style="margin-top:10px">Quem marcou o jogo cuida dos times, da súmula e do placar.</p>`;
   if (g.conf.filter(P).length >= 4 && W && !f) h += `<div style="margin-top:12px"><button class="btn btn-block btn-ball" data-act="step" data-step="times">Ir para os times</button></div>`;
   if (!f) h += whoGoingHTML(g);
@@ -4614,7 +4762,7 @@ function paySheetHTML(pid, key, gid) {
   const p = P(pid); if (!p) return '';
   const c = payCfg(), st = payState(pid, key), mens = isMensalista(pid), valor = payKeyValor(pid, key);
   const quando = t => { const d = new Date(t), ds = todayStr() === localKey(t).slice(0, 10) ? 'hoje' : fmtDay(localKey(t).slice(0, 10)).toLowerCase(); return `${ds}, ${pad(d.getHours())}h${pad(d.getMinutes())}`; };
-  let h = `<div class="row" style="align-items:center;gap:12px;margin:-4px 0 14px">${avatar(p)}<div><div class="item-title">${esc(p.nick || p.name)}</div><div class="sub small">${mens ? `Mensalista${c.desde[pid] ? ` desde ${esc(fmtDay(c.desde[pid]).toLowerCase())}` : ''}` : (p.guest ? 'Convidado sem conta' : 'Avulso')}</div></div></div>`;
+  let h = `<div class="row" style="align-items:center;gap:12px;margin:-4px 0 14px">${avatar(p)}<div><div class="item-title">${esc(nomeVis(p))}</div><div class="sub small">${mens ? `Mensalista${c.desde[pid] ? ` desde ${esc(fmtDay(c.desde[pid]).toLowerCase())}` : ''}` : (p.guest ? 'Convidado sem conta' : 'Avulso')}</div></div></div>`;
   const proporcional = key.startsWith('m:') && valor !== c.mensal;
   h += `<div class="pay-card"><div class="row" style="align-items:baseline"><span class="item-title">${esc(payKeyLabel(key))}</span><span class="spacer"></span><span class="pay-v num" style="font-size:26px">${money(valor)}</span></div>`;
   if (proporcional) h += `<p class="sub small" style="margin:0">Proporcional: entrou no meio do mês.</p>`;
@@ -4917,7 +5065,7 @@ const ACT = {
   zoomPhoto: el => {
     const p = P(el.dataset.pid); if (!p || !p.photo) return;
     const z = $('#zoom');
-    z.innerHTML = `<div class="zoom-bg" data-act="zoomClose" role="dialog" aria-modal="true" aria-label="Foto de ${esc(p.nick || p.name)}"><button class="icon-btn zoom-close" data-act="zoomClose" aria-label="Fechar">${ICON.x}</button><img id="zoomImg" src="${p.photo}" alt="Foto de ${esc(p.nick || p.name)}"><div class="zoom-cap">${esc(p.nick || p.name)}</div></div>`;
+    z.innerHTML = `<div class="zoom-bg" data-act="zoomClose" role="dialog" aria-modal="true" aria-label="Foto de ${esc(nomeVis(p))}"><button class="icon-btn zoom-close" data-act="zoomClose" aria-label="Fechar">${ICON.x}</button><img id="zoomImg" src="${p.photo}" alt="Foto de ${esc(nomeVis(p))}"><div class="zoom-cap">${esc(nomeVis(p))}</div></div>`;
     z.dataset.pid = p.id;
     if (FB() && S.db.getPhoto) S.db.getPhoto(p.id).then(big => { const img = $('#zoomImg'); if (big && img && z.dataset.pid === p.id && PHOTO_RE.test(big)) img.src = big; }).catch(() => { });
   },
@@ -5086,6 +5234,38 @@ const ACT = {
     if (!ja) g.teams[t].push(id);
     teamsSave(g);
   },
+  escSis: el => { S.ui.sistema = el.dataset.v; S.ui.escSel = null; const g = curGame(); if (g && canEditGame(g) && g.escalacao) { g.escalacao = gerarEscalacao(g, S.ui.sistema); persist('games', g.id); } render(); },
+  escGerar: () => { const g = curGame(); if (!g || !canEditGame(g)) return; S.ui.escSel = null; g.escalacao = gerarEscalacao(g, S.ui.sistema || (g.escalacao && g.escalacao.sistema) || '6x0'); persist('games', g.id); render(); toast('Posições prontas.'); },
+  escTroca: el => {
+    const g = curGame(); if (!g || !canEditGame(g) || !g.escalacao) return;
+    const t = Number(el.dataset.t), id = el.dataset.id, sel = S.ui.escSel;
+    if (!sel || sel.t !== t) { S.ui.escSel = { t, id }; return render(); }
+    if (sel.id === id) { S.ui.escSel = null; return render(); }
+    const e = clone(g.escalacao), x = e.t[t];
+    const onde = v => { const z = x.z.indexOf(v); return z >= 0 ? ['z', z] : ['b', x.b.indexOf(v)]; };
+    const [ka, ia] = onde(sel.id), [kb, ib] = onde(id);
+    if (ia < 0 || ib < 0) { S.ui.escSel = null; return render(); }
+    x[ka][ia] = id; x[kb][ib] = sel.id;
+    g.escalacao = cleanEscalacao(e); S.ui.escSel = null; persist('games', g.id); render();
+  },
+  avulsoNovo: () => openSheet({ type: 'avulso' }),
+  avOpc: el => { el.parentElement.querySelectorAll('[data-act="avOpc"]').forEach(b => b.setAttribute('aria-pressed', String(b === el))); },
+  avulsoSalvar: el => {
+    const g = curGame(); if (!g || !canEditGame(g)) return;
+    const nome = ($('#avNome').value || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!nome) { $('#fErr').textContent = 'Coloque o nome.'; $('#avNome').focus(); return; }
+    const opc = k => ((document.querySelector(`[data-act="avOpc"][data-g="${k}"][aria-pressed="true"]`) || {}).dataset || {}).v;
+    const pos = POS[opc('pos')] ? opc('pos') : 'cor', level = LEVELS[opc('nivel')] ? opc('nivel') : 'exp', t = Number(opc('time'));
+    const id = 'g_' + uid(''), now = Date.now();
+    const p = cleanPlayer(id, { name: nome, nick: '', pos, pos2: [], level, base: { at: presetAt(level, pos, 80) }, adj: [], created: now, updated: now, ownerUid: null, guest: true, createdBy: meId(), locked: false, temp: true, tempGid: g.id });
+    S.players[id] = p; if (privacyOn()) { S.profiles[id] = profileFrom(p); dirty(); }
+    persist('players', id, 0, () => saveProfile(id));
+    if (g.max && g.conf.length + 1 > g.max) g.max = g.conf.length + 1;
+    if (!g.conf.includes(id)) presenceSet(g, id, true);
+    const T = g.nTeams || 2;
+    if (t >= 0 && t < T) { if (!g.teams || g.teams.length !== T) g.teams = Array.from({ length: T }, (_, i) => (g.teams && g.teams[i]) || []); g.teams[t].push(id); }
+    closeSheet(); teamsSave(g, t >= 0 ? `${nome} entrou como avulso no time ${TEAMS[t].name.toLowerCase()}.` : `${nome} entrou como avulso. Escolha o time dele.`);
+  },
   teamOut: el => { const g = curGame(); if (!g || !canEditGame(g) || !g.teams) return; const id = el.dataset.pid; g.teams = g.teams.map(t => t.filter(x => x !== id)); teamsSave(g); },
   capPick: el => {
     const g = curGame(); if (!g || !canEditGame(g) || g.sets.length) return;
@@ -5200,7 +5380,7 @@ const ACT = {
     catch (e) { el.disabled = false; $('#fErr').textContent = 'Não consegui publicar agora. Confira a internet e tente de novo.'; }
   },
   askFecharVagas: () => { const g = curGame(); if (!g || !canEditGame(g)) return; openSheet({ type: 'confirm', title: 'Fechar as vagas?', text: 'O jogo sai da lista de abertos. Quem já foi aprovado continua na lista.', ok: 'Fechar as vagas', run: () => { closeSheet(); g.aberto = null; persist('games', g.id); delete S.abertos[g.id]; window.MCloud.abertoDel(g.id).catch(() => { }); render(); toast('Vagas fechadas.'); } }); },
-  pedidoOk: async el => { const g = curGame(), pe = g && (S.pedidosOrg[g.id] || {})[el.dataset.uid]; if (!pe) return; try { await aprovarPedido(g, pe); toast(`${pe.nick || pe.name} entrou na lista como visitante.`); } catch (e) { toast('Não consegui aprovar agora.'); } },
+  pedidoOk: async el => { const g = curGame(), pe = g && (S.pedidosOrg[g.id] || {})[el.dataset.uid]; if (!pe) return; try { await aprovarPedido(g, pe); toast(`${nomeVis(pe)} entrou na lista como visitante.`); } catch (e) { toast('Não consegui aprovar agora.'); } },
   pedidoNo: async el => { const g = curGame(); if (!g) return; try { await window.MCloud.pedidoUpdate(g.id, el.dataset.uid, { status: 'recusado', decidedAt: Date.now() }); toast('Pedido recusado.'); } catch (e) { toast('Não consegui recusar agora.'); } },
   chamarTurma: async el => { const g = curGame(); if (!g) return; try { await window.MCloud.pedidoUpdate(g.id, el.dataset.uid, { convite: { link: inviteLink(), n: (S.turma && S.turma.name) || '', by: meId(), at: Date.now() } }); toast('Convite enviado. A pessoa vê no sino e entra quando quiser.'); } catch (e) { toast('Não consegui chamar agora.'); } },
   payFilter: el => { S.ui.payFilter = el.dataset.v || ''; render(); },
@@ -5701,7 +5881,7 @@ const ACT = {
       else { S.games[gid].conf.push(p.id); persist('games', gid); }
     }
     closeSheet(); render();
-    toast(f.kind === 'self' ? 'Carta pronta.' : `Carta de ${p.nick || p.name} criada: ${ovrOf(P(p.id))}.`);
+    toast(f.kind === 'self' ? 'Carta pronta.' : `Carta de ${nomeVis(p)} criada: ${ovrOf(P(p.id))}.`);
     if (f.kind === 'self') maybeTour();
   },
   askDeletePlayer: el => {
