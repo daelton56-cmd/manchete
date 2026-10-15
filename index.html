@@ -1885,6 +1885,7 @@ function notifData() {
     if (needsMyVote(g)) act.push({ kind: 'vote', g, t: g.created || 0 });
     if (g.createdBy !== me && g.status !== 'encerrado' && g.date >= today && g.created) news.push({ kind: g.vis === 'privada' && g.allowed.includes(me) ? 'invite' : 'game', g, uid: g.createdBy, t: g.created });
     if (galeraMvp(g).includes(me)) news.push({ kind: 'mvp', g, t: new Date(voteCloseDate(g) + 'T23:00').getTime() });
+    else if (g.galera && (g.teams || []).some(t => t.includes(me))) { const r = resultOf(g), row = r && r.players && r.players[me]; news.push({ kind: 'resultado', g, d: row ? row.ovrAfter - row.ovrBefore : null, t: g.galera.at || new Date(voteCloseDate(g) + 'T23:00').getTime() }); }
   }
   if (FBM()) for (const f of Object.values(S.friendships || {})) if (f && f.via === 'link' && f.status === 'accepted' && f.from === me && f.acceptedAt && Date.now() - f.acceptedAt < 14 * 864e5) news.push({ kind: 'amigoLink', nome: f.toNick || f.toName || 'Alguém', t: f.acceptedAt });
   if (FBM()) for (const g of Object.values(S.games)) if (contestado(g) && canEditGame(g)) act.push({ kind: 'contest', g, t: (g.contest && g.contest.at) || 0 });
@@ -1936,9 +1937,10 @@ function notifsHTML() {
     if (n.kind === 'pedOk') return `${esc(n.a.orgName)} aprovou seu pedido: jogo de ${esc(fmtDay(n.a.date).toLowerCase())}, ${esc(fmtTime(n.a.time))}.`;
     if (n.kind === 'pedNo') return `Seu pedido para o jogo de ${esc(fmtDay(n.a.date).toLowerCase())} não foi aprovado.`;
     if (n.kind === 'admin') return `${fn(n.uid)} te promoveu a admin do ${esc((S.turma && S.turma.name) || 'turma')}.`;
-    if (n.kind === 'joined') return personName(n.uid) ? `${fn(n.uid)} entrou pelo seu convite. Vocês já são amigos.` : 'Alguém novo entrou pelo seu convite. Vocês já são amigos, e a carta aparece no Elenco quando a pessoa criar.';
+    if (n.kind === 'joined') return personName(n.uid) ? `${fn(n.uid)} entrou pelo seu convite e aceitou ser seu amigo.` : 'Alguém novo entrou pelo seu convite e aceitou ser seu amigo. A carta aparece no Elenco quando a pessoa criar.';
     if (n.kind === 'invite') return `${fn(n.uid)} te convidou para uma partida privada, ${esc(fmtDay(n.g.date).toLowerCase())}.`;
     if (n.kind === 'game') return `${personName(n.uid) ? fn(n.uid) + ' marcou' : 'Marcaram'} um jogo: ${esc(fmtDay(n.g.date).toLowerCase())}, ${esc(fmtTime(n.g.time))}.`;
+    if (n.kind === 'resultado') return `Saiu o resultado do jogo de ${esc(fmtDay(n.g.date).toLowerCase())}: ${n.d == null ? 'veja como ficou sua carta' : n.d > 0 ? `sua carta subiu ${n.d}` : n.d < 0 ? `sua carta desceu ${Math.abs(n.d)}` : 'sua carta ficou igual'}.`;
     if (n.kind === 'mvp') return `Você foi o MVP da galera no jogo de ${esc(fmtDay(n.g.date).toLowerCase())}.`;
     return '';
   };
@@ -4075,7 +4077,7 @@ function notasHTML(g) {
     return section('Notas da galera', h);
   }
   if (est === 'antes') return section('Notas da galera', `<p class="sub">A votação abre quando o jogo for encerrado, ou sozinha às ${(d => d.getHours() + 'h' + (d.getMinutes() ? String(d.getMinutes()).padStart(2, '0') : ''))(new Date(notasAbre(g)))}, e fica aberta até as 23h do dia seguinte.</p>`);
-  if (est === 'fechada') { if (isTurmaAdmin()) setTimeout(ensureNotas, 0); return section('Notas da galera', '<p class="sub">A votação fechou. O resultado aparece assim que um admin abrir o app.</p>'); }
+  if (est === 'fechada') { if (isTurmaAdmin() || (g.notasCriador && g.createdBy === meId())) setTimeout(ensureNotas, 0); return section('Notas da galera', `<p class="sub">A votação fechou. O resultado aparece assim que ${g.notasCriador ? 'um admin ou quem marcou o jogo' : 'um admin'} abrir o app.</p>`); }
   const rat = rateesFor(g, me), mine = notasMinhas(g), dadas = rat.filter(pid => mine[pid] != null).length;
   const nv = vs.filter(u => notasDone(g, u)).length;
   let h = `<p class="sub" style="margin:-4px 0 10px">Aberta até ${esc(fmtFecha(notasFecha(g)))}. Ninguém vê quem deu qual nota.${isTurmaAdmin() ? ` ${nv} de ${vs.length} já terminaram.` : ''}</p>`;
