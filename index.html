@@ -703,6 +703,10 @@ input[type=date].input::-webkit-datetime-edit,input[type=time].input::-webkit-da
 .esc-banco{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:10px}
 .esc-bchip.sel{background:#0F2240; color:#fff}
 @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .esc-quadra{background:linear-gradient(180deg,#5A4325,#4C381F); box-shadow:inset 0 0 0 3px rgba(255,255,255,.25)} :root:not([data-theme="light"]) .esc-p{color:#F5E9D6} :root:not([data-theme="light"]) .esc-p.sel{background:rgba(255,255,255,.12); box-shadow:inset 0 0 0 2px #F7C531} }
+
+/* a página nunca rola para o lado, nem durante uma animação */
+body{overflow-x:hidden}
+@supports (overflow:clip){ body{overflow-x:clip} }
 @media (prefers-reduced-motion:reduce){
   .sheet, .sheet-bg{animation:none}
   .btn, .chip, .toggle, .card-btn, .item{transition:none}
@@ -2148,7 +2152,7 @@ function elencoSocial() {
   if (!ps.length) h += filter === 'recentes'
     ? `<div class="empty"><h3>Ninguém por aqui ainda</h3><p class="sub">Depois das próximas partidas, quem jogou com você aparece aqui.</p></div>`
     : filter === 'amigos' ? `<div class="empty"><h3>Nenhum amigo nesta turma ainda</h3><p class="sub">Toque na faixa amarela das cartas para adicionar quem você conhece.</p></div>`
-    : `<div class="empty"><h3>Só você por aqui</h3><p class="sub">Mande o seu link para a galera. Quem entrar já chega como seu amigo.</p></div>`;
+    : `<div class="empty"><h3>Só você por aqui</h3><p class="sub">Mande o link da turma para a galera. Quem entrar aparece aqui, e você adiciona como amigo quem quiser.</p></div>`;
   else h += cardsGrid(ps, filter === 'recentes' ? (p => `<div class="sub small" style="text-align:center">${cnt.get(p.id) === 1 ? '1 jogo juntos' : (cnt.get(p.id) || 0) + ' jogos juntos'}</div>`) : null, { addBar: true });
   // Quem já está na turma mas ainda não criou a carta.
   const noCard = filter ? [] : Object.keys(S.members).filter(u => u !== meId() && !S.players[u]);
@@ -5945,10 +5949,14 @@ const INP = {
   pname: () => updateFormPreview(),
   num: el => numCheck(el, false)
 };
+// Toque duplo num botão de folha: o segundo toque cairia no que estava embaixo da folha, no mesmo ponto.
+var TOQUE_FOLHA = null;
 document.addEventListener('click', e => {
   if (e.target && e.target.dataset && e.target.dataset.sheetbg) return closeSheet();
   const el = e.target.closest && e.target.closest('[data-act]');
   if (!el || el.disabled) return;
+  if (TOQUE_FOLHA && !el.closest('.sheet') && Date.now() - TOQUE_FOLHA.t < 400 && Math.abs(e.clientX - TOQUE_FOLHA.x) < 30 && Math.abs(e.clientY - TOQUE_FOLHA.y) < 30) { e.preventDefault(); return; }
+  TOQUE_FOLHA = el.closest('.sheet') ? { t: Date.now(), x: e.clientX, y: e.clientY } : null;
   const fn = ACT[el.dataset.act];
   if (!fn) return;
   e.preventDefault();
